@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     allowed_chat_ids: set[int] = Field(default_factory=set)
 
     spreadsheet_id: str = ""
-    currency: str = "EGP"
+    currency: str = "CAD"
     timezone: str = "Africa/Cairo"
 
     google_cloud_project: str = ""

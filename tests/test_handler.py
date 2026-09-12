@@ -33,7 +33,7 @@ def make_handler(proposal: Draft | None = None, categories=("Groceries",), error
         bot=bot,
         repositories=SingleUserRepositories(repo),
         proposer=StubProposer(proposal, error=error),
-        currency="EGP",
+        currency="CAD",
         clock=lambda: NOW,
     )
     return handler, bot, repo
@@ -47,7 +47,7 @@ def a_text_update(text: str = "lunch 45.20 seoudi") -> dict:
 
 
 def a_callback_update(action: str, draft: Draft) -> dict:
-    card = render_card(draft, currency="EGP")
+    card = render_card(draft, currency="CAD")
     return {
         "update_id": 2,
         "callback_query": {

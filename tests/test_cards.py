@@ -44,21 +44,21 @@ def as_telegram_message(draft: Draft) -> dict:
 
 
 def test_card_shows_the_amount_with_currency():
-    card = render_card(a_draft(), currency="EGP")
+    card = render_card(a_draft(), currency="CAD")
 
     assert "45.20" in card.text
-    assert "EGP" in card.text
+    assert "CAD" in card.text
 
 
 def test_card_shows_category_and_merchant():
-    card = render_card(a_draft(), currency="EGP")
+    card = render_card(a_draft(), currency="CAD")
 
     assert "Groceries" in card.text
     assert "Seoudi" in card.text
 
 
 def test_accept_and_discard_buttons_carry_the_draft_id():
-    card = render_card(a_draft(draft_id="abc123"), currency="EGP")
+    card = render_card(a_draft(draft_id="abc123"), currency="CAD")
 
     callbacks = [
         button["callback_data"]
@@ -71,7 +71,7 @@ def test_accept_and_discard_buttons_carry_the_draft_id():
 
 
 def test_button_callback_data_stays_within_telegram_limit():
-    card = render_card(a_draft(merchant="A" * 200, note="B" * 200), currency="EGP")
+    card = render_card(a_draft(merchant="A" * 200, note="B" * 200), currency="CAD")
 
     for row in card.reply_markup["inline_keyboard"]:
         for button in row:
@@ -79,13 +79,13 @@ def test_button_callback_data_stays_within_telegram_limit():
 
 
 def test_a_new_category_is_flagged_on_the_card():
-    card = render_card(a_draft(is_new_category=True), currency="EGP")
+    card = render_card(a_draft(is_new_category=True), currency="CAD")
 
     assert "new category" in card.text.lower()
 
 
 def test_an_existing_category_is_not_flagged():
-    card = render_card(a_draft(is_new_category=False), currency="EGP")
+    card = render_card(a_draft(is_new_category=False), currency="CAD")
 
     assert "new category" not in card.text.lower()
 
