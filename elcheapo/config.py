@@ -19,7 +19,12 @@ class Settings(BaseSettings):
     # file with two ids failed outright.
     allowed_chat_ids: Annotated[set[int], NoDecode] = Field(default_factory=set)
 
-    spreadsheet_id: str = ""
+    # Service account key, used to dial Cloud SQL. Gitignored; never commit.
+    firebase_credentials: str = "elcheapo.json"
+    db_instance: str = "el-cheapo-8da76:northamerica-northeast1:el-cheapo-8da76-instance"
+    db_name: str = "elcheapo"
+    db_user: str = "elcheapo_app"
+    db_password: str = ""
     currency: str = "CAD"
     timezone: str = "America/Toronto"
 

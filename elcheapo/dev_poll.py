@@ -12,8 +12,7 @@ from elcheapo.agent.proposer import AgentProposer
 from elcheapo.channels.telegram.client import TelegramBot
 from elcheapo.config import Settings
 from elcheapo.handler import ExpenseHandler
-from elcheapo.repositories import SingleUserRepositories
-from elcheapo.store.memory import InMemoryRepository
+from elcheapo.store.postgres import PostgresRepositories, create_engine
 from elcheapo.updates import chat_id_of
 
 
@@ -24,8 +23,26 @@ async def run() -> None:
     me = await bot.get_me()
     print(f"connected as @{me['username']}")
 
-    repository = InMemoryRepository()
-    repositories = SingleUserRepositories(repository)
+    engine = create_engine(
+        instance=settings.db_instance,
+        database=settings.db_name,
+        user=settings.db_user,
+        password=settings.db_password,
+        credentials_path=settings.firebase_credentials,
+    )
+    try:
+        with engine.connect():
+            pass
+    except Exception as error:  # noqa: BLE001
+        print(f"
+cannot reach the database: {error}
+")
+        print("If this says cloudsql.instances.get, the service account is")
+        print("missing roles/cloudsql.client. See README.")
+        return
+    print(f"database ready: {settings.db_name}")
+
+    repositories = PostgresRepositories(engine)
 
     handler = ExpenseHandler(
         bot=bot,

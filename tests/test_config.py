@@ -70,3 +70,42 @@ def test_a_group_chat_id_loads_from_a_dotenv_file(tmp_path):
     )
 
     assert settings.allowed_chat_ids == {111, -1001234567890}
+
+
+def test_every_setting_is_documented_in_the_env_example():
+    """A setting nobody knows exists is a setting nobody sets.
+
+    New fields on Settings must be added to .env.example, which is the only
+    place a newcomer learns what the app can be configured with.
+    """
+    import re
+    from pathlib import Path
+
+    documented = set(
+        re.findall(
+            r"^([A-Z_]+)=",
+            Path(".env.example").read_text(encoding="utf-8"),
+            re.M,
+        )
+    )
+    expected = {name.upper() for name in Settings.model_fields}
+
+    assert expected - documented == set(), "undocumented settings"
+
+
+def test_the_env_example_has_no_variables_that_are_not_settings():
+    import re
+    from pathlib import Path
+
+    documented = set(
+        re.findall(
+            r"^([A-Z_]+)=",
+            Path(".env.example").read_text(encoding="utf-8"),
+            re.M,
+        )
+    )
+    known = {name.upper() for name in Settings.model_fields}
+    # GOOGLE_GENAI_USE_VERTEXAI is read by the Google SDK, not by Settings.
+    allowed_extras = {"GOOGLE_GENAI_USE_VERTEXAI"}
+
+    assert documented - known - allowed_extras == set(), "stale variables"
