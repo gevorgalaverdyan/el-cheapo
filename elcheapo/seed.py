@@ -14,13 +14,7 @@ from elcheapo.store.schema import create_schema, seed_platform_categories
 def run() -> None:
     settings = Settings()
 
-    engine = create_engine(
-        instance=settings.db_instance,
-        database=settings.db_name,
-        user=settings.db_user,
-        password=settings.db_password,
-        credentials_path=settings.firebase_credentials,
-    )
+    engine = create_engine(settings.database_url)
 
     create_schema(engine)
     print("schema applied")

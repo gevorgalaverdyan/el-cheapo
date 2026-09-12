@@ -3,6 +3,23 @@
 import httpx
 
 API_ROOT = "https://api.telegram.org"
+REDACTED = "<bot-token>"
+
+
+def redact(message: str, token: str) -> str:
+    """Remove a bot token from text.
+
+    Every Bot API call carries the token in its URL, so any HTTP error message
+    quotes it verbatim. Left alone it ends up in terminals, log aggregators and
+    bug reports -- and a leaked token is a compromised bot.
+    """
+    if not token:
+        return message
+    return message.replace(token, REDACTED)
+
+
+class TelegramError(RuntimeError):
+    """A Bot API call failed. Never carries the token."""
 
 
 class TelegramBot:
@@ -48,20 +65,29 @@ class TelegramBot:
 
     async def download(self, file_id: str) -> bytes:
         info = await self._call("getFile", {"file_id": file_id})
-        response = await self._client.get(
-            f"{API_ROOT}/file/bot{self._token}/{info['file_path']}"
-        )
-        response.raise_for_status()
+        try:
+            response = await self._client.get(
+                f"{API_ROOT}/file/bot{self._token}/{info['file_path']}"
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TelegramError(redact(str(error), self._token)) from None
         return response.content
 
     async def _call(self, method: str, payload: dict):
-        response = await self._client.post(
-            f"{API_ROOT}/bot{self._token}/{method}", json=payload
-        )
-        response.raise_for_status()
+        try:
+            response = await self._client.post(
+                f"{API_ROOT}/bot{self._token}/{method}", json=payload
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TelegramError(redact(str(error), self._token)) from None
+
         body = response.json()
         if not body.get("ok"):
-            raise RuntimeError(f"telegram {method} failed: {body.get('description')}")
+            raise TelegramError(
+                redact(f"telegram {method} failed: {body.get('description')}", self._token)
+            )
         return body["result"]
 
     async def aclose(self) -> None:

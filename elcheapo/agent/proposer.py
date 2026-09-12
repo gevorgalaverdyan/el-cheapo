@@ -9,15 +9,16 @@ lives in the card payload or the database.
 import logging
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
+from google.adk.sessions import BaseSessionService, InMemorySessionService
 from google.genai import types
 
 from elcheapo.agent.agent import build_agent
+from elcheapo.agent.conversations import DEFAULT_IDLE_TIMEOUT, Conversations
 from elcheapo.agent.tools import PROPOSE_EXPENSE
 from elcheapo.models import AgentReply, Attachment, Draft, source_for
 from elcheapo.repositories import Repositories
@@ -40,6 +41,8 @@ class AgentProposer:
         repositories: Repositories,
         currency: str,
         timezone: str,
+        idle_timeout: timedelta = DEFAULT_IDLE_TIMEOUT,
+        session_service: BaseSessionService | None = None,
     ):
         # ADK reads credentials from the environment rather than taking them as
         # arguments, so an API key has to be published there before the agent runs.
@@ -51,7 +54,10 @@ class AgentProposer:
         self._repositories = repositories
         self._currency = currency
         self._zone = ZoneInfo(timezone)
-        self._sessions = InMemorySessionService()
+        # In-memory only when nothing better is supplied -- tests and the
+        # receipt harness. Anything long-running passes a database-backed one.
+        self._sessions = session_service or InMemorySessionService()
+        self._conversations = Conversations(idle_timeout=idle_timeout)
 
     async def propose(
         self, *, text: str, chat_id: int, attachment: Attachment | None = None
@@ -76,7 +82,9 @@ class AgentProposer:
         )
 
         user_id = str(chat_id)
-        session_id = f"chat-{chat_id}"
+        # A new id after a silence or a /reset means the agent starts clean,
+        # without any session having to be deleted.
+        session_id = self._conversations.session_for(chat_id)
         await self._ensure_session(user_id, session_id)
 
         parts = []
@@ -108,6 +116,10 @@ class AgentProposer:
             draft=self._to_draft(proposal, categories, today, attachment),
             text=answer,
         )
+
+    def reset(self, chat_id: int) -> None:
+        """Abandon this chat's conversation. Logged expenses are untouched."""
+        self._conversations.reset(chat_id)
 
     async def _ensure_session(self, user_id: str, session_id: str) -> None:
         existing = await self._sessions.get_session(

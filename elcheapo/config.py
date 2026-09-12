@@ -19,18 +19,17 @@ class Settings(BaseSettings):
     # file with two ids failed outright.
     allowed_chat_ids: Annotated[set[int], NoDecode] = Field(default_factory=set)
 
-    # Service account key, used to dial Cloud SQL. Gitignored; never commit.
-    firebase_credentials: str = "elcheapo.json"
-    db_instance: str = "el-cheapo-8da76:northamerica-northeast1:el-cheapo-8da76-instance"
-    db_name: str = "elcheapo"
-    db_user: str = "elcheapo_app"
-    db_password: str = ""
+    database_url: str = (
+        "postgresql+pg8000://elcheapo:elcheapo@127.0.0.1:5433/elcheapo"
+    )
     currency: str = "CAD"
     timezone: str = "America/Toronto"
 
     google_cloud_project: str = ""
     google_cloud_location: str = "us-central1"
     gemini_model: str = "gemini-3.5-flash-lite"
+    # Minutes of silence after which a chat starts a fresh conversation.
+    session_idle_minutes: int = 15
 
     @field_validator("allowed_chat_ids", mode="before")
     @classmethod

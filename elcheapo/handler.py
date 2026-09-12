@@ -33,6 +33,12 @@ MODEL_UNAVAILABLE = (
 )
 COMMIT_FAILED = "I couldn't save that to the sheet. Tap Accept again to retry."
 DOWNLOAD_FAILED = "I couldn't download that file. Try sending it again."
+RESET_DONE = (
+    "Fresh start. I've forgotten what we were talking about -- "
+    "your logged expenses are untouched."
+)
+
+RESET = "/reset"
 
 
 class Bot(Protocol):
@@ -55,6 +61,8 @@ class Proposer(Protocol):
     async def propose(
         self, *, text: str, chat_id: int, attachment: Attachment | None = None
     ) -> AgentReply: ...
+
+    def reset(self, chat_id: int) -> None: ...
 
 
 class ExpenseHandler:
@@ -84,6 +92,13 @@ class ExpenseHandler:
         # A photo or voice note carries its words in `caption`, not `text`.
         text = message.get("text") or message.get("caption") or ""
         reference = attachment_in(message)
+
+        if _is_reset(text):
+            # Handled here, never sent to the model: it costs nothing and the
+            # user gets the same answer every time.
+            self._proposer.reset(chat_id)
+            await self._bot.send_message(chat_id, RESET_DONE)
+            return
 
         if reference is None and not text.strip():
             # A sticker, a location, a poll. Nothing to read, so nothing is
@@ -159,3 +174,14 @@ class ExpenseHandler:
         await self._bot.edit_message_text(
             chat_id, message_id, card.text, card.reply_markup
         )
+
+
+def _is_reset(text: str) -> bool:
+    """Whether this message is the /reset command.
+
+    Telegram rewrites commands as /reset@botname in groups, so the bot
+    suffix is stripped before comparing.
+    """
+    command, _, _ = text.strip().partition(" ")
+    command, _, _ = command.partition("@")
+    return command.casefold() == RESET

@@ -89,6 +89,7 @@ class StubProposer:
         self._reply = reply
         self.seen: list[str] = []
         self.attachments: list = []
+        self.resets: list[int] = []
 
     async def propose(self, *, text: str, chat_id: int, attachment=None):
         self.seen.append(text)
@@ -96,3 +97,6 @@ class StubProposer:
         if self._error is not None:
             raise self._error
         return AgentReply(draft=self._draft, text=self._reply)
+
+    def reset(self, chat_id: int) -> None:
+        self.resets.append(chat_id)

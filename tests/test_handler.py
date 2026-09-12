@@ -303,3 +303,63 @@ async def test_silence_from_the_agent_still_gets_a_reply():
 
     assert len(bot.sent) == 1
     assert "couldn't read" in bot.sent[0]["text"]
+
+
+async def test_reset_starts_a_fresh_conversation():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+
+    await handler.handle(a_text_update("/reset"))
+
+    assert proposer.resets == [CHAT]
+
+
+async def test_reset_confirms_to_the_user():
+    handler, bot, _ = make_handler()
+
+    await handler.handle(a_text_update("/reset"))
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["reply_markup"] is None
+
+
+async def test_reset_never_reaches_the_model():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+
+    await handler.handle(a_text_update("/reset"))
+
+    assert proposer.seen == []
+
+
+async def test_reset_works_when_telegram_appends_the_bot_name():
+    # In groups Telegram rewrites commands as /reset@elcheapo_bot.
+    handler, bot, repo, proposer = make_handler_with_proposer()
+
+    await handler.handle(a_text_update("/reset@elcheapo_bot"))
+
+    assert proposer.resets == [CHAT]
+
+
+async def test_reset_is_case_insensitive():
+    handler, bot, repo, proposer = make_handler_with_proposer()
+
+    await handler.handle(a_text_update("/Reset"))
+
+    assert proposer.resets == [CHAT]
+
+
+async def test_a_message_merely_containing_reset_is_not_a_command():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+
+    await handler.handle(a_text_update("reset my expectations, coffee 4.00"))
+
+    assert proposer.resets == []
+    assert proposer.seen == ["reset my expectations, coffee 4.00"]
+
+
+async def test_an_ordinary_message_still_reaches_the_model():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+
+    await handler.handle(a_text_update("coffee 4.00"))
+
+    assert proposer.resets == []
+    assert len(proposer.seen) == 1

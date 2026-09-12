@@ -7,12 +7,15 @@ what you exercise here is the real code path.
 """
 
 import asyncio
+from datetime import timedelta
 
 from elcheapo.agent.proposer import AgentProposer
 from elcheapo.channels.telegram.client import TelegramBot
 from elcheapo.config import Settings
 from elcheapo.handler import ExpenseHandler
-from elcheapo.store.postgres import PostgresRepositories, create_engine
+from google.adk.sessions import DatabaseSessionService
+
+from elcheapo.store.postgres import PostgresRepositories, async_url, create_engine
 from elcheapo.updates import chat_id_of
 
 
@@ -23,26 +26,20 @@ async def run() -> None:
     me = await bot.get_me()
     print(f"connected as @{me['username']}")
 
-    engine = create_engine(
-        instance=settings.db_instance,
-        database=settings.db_name,
-        user=settings.db_user,
-        password=settings.db_password,
-        credentials_path=settings.firebase_credentials,
-    )
+    engine = create_engine(settings.database_url)
     try:
         with engine.connect():
             pass
     except Exception as error:  # noqa: BLE001
-        print(f"
-cannot reach the database: {error}
-")
-        print("If this says cloudsql.instances.get, the service account is")
-        print("missing roles/cloudsql.client. See README.")
+        print(f"\ncannot reach the database: {error}\n")
+        print("Is the database running?  docker compose up -d")
         return
-    print(f"database ready: {settings.db_name}")
+    print("database ready")
 
     repositories = PostgresRepositories(engine)
+    # Conversations live in the same database as the expenses, so an open
+    # card survives a restart instead of losing its context.
+    sessions = DatabaseSessionService(db_url=async_url(settings.database_url))
 
     handler = ExpenseHandler(
         bot=bot,
@@ -53,6 +50,8 @@ cannot reach the database: {error}
             repositories=repositories,
             currency=settings.currency,
             timezone=settings.timezone,
+            idle_timeout=timedelta(minutes=settings.session_idle_minutes),
+            session_service=sessions,
         ),
         currency=settings.currency,
     )

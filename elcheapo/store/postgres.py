@@ -1,12 +1,11 @@
-"""Cloud SQL (Postgres) storage.
-
-Connections go through the Cloud SQL Python Connector, which authenticates
-with the service account and tunnels over TLS -- so no database IP has to be
-exposed and no network has to be allow-listed.
+"""Postgres storage.
 
 Postgres does everything the query language needs natively: ILIKE for merchant
-substrings, several range filters at once, and ordering. Unlike a document
-store, nothing has to be re-filtered in Python.
+substrings, several range filters at once, exact NUMERIC money, and ordering.
+Unlike a document store, nothing has to be re-filtered in Python.
+
+The connection is a plain URL, so the same code runs against the local Docker
+container and against any managed Postgres later.
 """
 
 import logging
@@ -14,8 +13,6 @@ from datetime import date as Date
 from decimal import Decimal
 
 import sqlalchemy
-from google.cloud.sql.connector import Connector, IPTypes
-from google.oauth2 import service_account
 from sqlalchemy import text
 
 from elcheapo.models import Category, Expense, ExpenseQuery
@@ -23,28 +20,34 @@ from elcheapo.models import Category, Expense, ExpenseQuery
 log = logging.getLogger(__name__)
 
 
-def create_engine(
-    *, instance: str, database: str, user: str, password: str, credentials_path: str
-) -> sqlalchemy.engine.Engine:
-    """Build a pooled engine that dials Cloud SQL through the connector."""
-    connector = Connector(
-        credentials=service_account.Credentials.from_service_account_file(
-            credentials_path,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        ),
-        ip_type=IPTypes.PUBLIC,
-    )
+ASYNC_DRIVER = "postgresql+asyncpg://"
 
-    def connect():
-        return connector.connect(
-            instance, "pg8000", user=user, password=password, db=database
-        )
 
+def async_url(database_url: str) -> str:
+    """The same database, addressed with an async driver.
+
+    The app talks to Postgres synchronously through pg8000, but ADK's session
+    store wants an async engine, and pg8000 cannot provide one. Both point at
+    the same database -- only the driver differs.
+    """
+    for prefix in ("postgresql+pg8000://", "postgresql+psycopg2://", "postgresql://"):
+        if database_url.startswith(prefix):
+            return ASYNC_DRIVER + database_url[len(prefix) :]
+
+    if database_url.startswith(ASYNC_DRIVER):
+        return database_url
+
+    raise ValueError(f"not a Postgres URL: {database_url!r}")
+
+
+def create_engine(database_url: str) -> sqlalchemy.engine.Engine:
+    """Build a pooled engine for `database_url`."""
     return sqlalchemy.create_engine(
-        "postgresql+pg8000://",
-        creator=connect,
+        database_url,
         pool_size=2,
         max_overflow=2,
+        # Recycles a connection the container closed while the bot sat idle,
+        # instead of surfacing it as a failed message.
         pool_pre_ping=True,
         pool_recycle=1800,
     )

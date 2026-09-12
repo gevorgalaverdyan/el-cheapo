@@ -1,0 +1,37 @@
+# Local Postgres for development.
+#
+#   docker compose up -d
+#   uv run python -m elcheapo.seed
+#
+# Credentials here are deliberately trivial: the port is bound to 127.0.0.1,
+# so nothing outside this machine can reach it. Never reuse them anywhere real.
+
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: elcheapo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: elcheapo
+      POSTGRES_PASSWORD: elcheapo
+      POSTGRES_DB: elcheapo
+    ports:
+      # 5433 on the host, not 5432: Windows/Hyper-V reserves parts of the
+      # ephemeral range and refuses the bind with a permissions error.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      # Postgres 18 wants the mount one level up, at /var/lib/postgresql,
+      # and keeps its data in a version subdirectory. Mounting .../data
+      # directly makes the image refuse to start.
+      - elcheapo-pgdata:/var/lib/postgresql
+    healthcheck:
+      # The app waits on this, so it must test a real query rather than just
+      # the port being open -- Postgres accepts connections briefly during
+      # init, then restarts, and a port check passes during that window.
+      test: ["CMD-SHELL", "pg_isready -U elcheapo -d elcheapo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  elcheapo-pgdata:
