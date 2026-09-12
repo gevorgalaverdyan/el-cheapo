@@ -3,7 +3,9 @@ import pytest
 
 from elcheapo.channels.telegram.client import TelegramBot, redact
 
-TOKEN = "8583244808:AAEQt3DtOTmmoNEtD84MQZTzhU3fvUArBZw"
+# Shaped like a real bot token, but invented. Never put a live token in a
+# test -- tests get committed.
+TOKEN = "1234567890:TEST-TOKEN-NOT-A-REAL-CREDENTIAL-000000"
 
 
 def test_a_token_is_removed_from_text():
