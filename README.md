@@ -4,9 +4,40 @@ A Telegram bot that tracks personal spending through conversation. Send it a
 photo of a receipt, a voice note, or a sentence like "45 on dinner last night",
 and it proposes an expense as a card. Nothing is stored until you tap Accept.
 
-It also searches Canadian store flyers for deals, and keeps a todo list.
+It keeps monthly budgets, searches Canadian store flyers for deals, and holds
+a todo list.
 
 Live at [@elcheapo_bot](https://web.telegram.org/k/#@elcheapo_bot).
+
+## About
+
+Most expense trackers fail for the same reason: logging is friction. You have to
+open an app, pick a category, type an amount — so you do it for a week, then
+stop, and the record is worth nothing because it has holes in it.
+
+ElCheapo removes the app. You log an expense in the chat window you already have
+open, in whatever form the evidence arrives: a photo of a receipt, a voice note
+on the walk home, or three words typed one-handed. Gemini reads it, and the bot
+replies with a card showing exactly what it understood. One tap files it.
+
+**The agent can never write to your data.** It proposes; only an Accept callback
+commits. Every expense stored was confirmed by a person looking at it, so a model
+misreading a receipt costs you a tap, not a corrupted ledger. Every tool is built
+bound to one chat's data, so a tool call cannot reach another user's records even
+if the model asks it to.
+
+Once the record is trustworthy it can do more than remember. Set a budget and the
+bot tells you where it stands at the moment you spend — unprompted, on the
+confirmation card, because that is the only moment the number changes anything.
+Ask what is on sale and it reads this week's real store flyers near your postal
+code, so it helps you spend less rather than only recording that you did.
+
+## Built with
+
+Python 3.12, Google ADK with Gemini for the agent and its tools, FastAPI for the
+webhook, Postgres for storage, the Telegram Bot API for the interface, and the
+Flipp weekly-ad API for flyer data. 318 tests, no network or database required to
+run them.
 
 ## What it can do
 
@@ -15,6 +46,7 @@ Live at [@elcheapo_bot](https://web.telegram.org/k/#@elcheapo_bot).
 | **Log spending** | Text, receipt photo, PDF or voice note. Gemini reads it; you confirm the card. |
 | **Answer questions** | "How much on dining this month?" — answered from your recorded expenses, never estimated. |
 | **Export** | An xlsx with totals and a chart, or a CSV, grouped by category, month or merchant. |
+| **Keep a budget** | Per category, per month. The confirmation card tells you where the budget stands the moment you spend. |
 | **Find deals** | This week's flyers near your postal code, via the Flipp API. Canada only. |
 | **Keep a todo list** | Add, list, complete and reword tasks. |
 | `/reset` | Start a fresh conversation. Happens on its own after 15 idle minutes. |
@@ -54,11 +86,16 @@ Re-run `elcheapo.seed` after pulling schema changes. Every statement is
 | `elcheapo/channels/telegram/` | Bot API client, cards, and Markdown → HTML for replies. |
 | `elcheapo/flipp.py` | Wrapper over the Flipp weekly-ad API. |
 | `elcheapo/reports.py` | xlsx and CSV generation. |
+| `elcheapo/budgets.py` | Monthly budget standing, derived from recorded expenses. |
 
 Two rules hold the design together. The agent can **propose** an expense but
 never write one — only an Accept callback reaches `commit_expense`. And every
 tool is built bound to one chat's repository, so a tool call cannot reach
 another chat's data even if the model asks for it.
+
+Budgets live in their own per-user table rather than on the category, because
+the platform categories are one shared row each — a budget stored there would
+be everybody's budget at once.
 
 `InMemoryRepository` is not a leftover: it implements the same protocol as
 Postgres so the tests and the receipt harness can run without a container.
