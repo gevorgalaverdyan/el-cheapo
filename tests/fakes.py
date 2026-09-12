@@ -111,3 +111,38 @@ class StubProposer:
 
     def reset(self, chat_id: int) -> None:
         self.resets.append(chat_id)
+
+
+class FakeFlipp:
+    """Canned Flipp responses, recording the calls made instead of making them."""
+
+    def __init__(
+        self,
+        *,
+        deals: dict | None = None,
+        flyers: dict | None = None,
+        items: dict | None = None,
+        error: Exception | None = None,
+    ):
+        self._deals = deals or {"items": [], "total": 0}
+        self._flyers = flyers or {"flyers": [], "total": 0}
+        self._items = items or {"items": [], "total": 0}
+        self.error = error
+        self.calls: list[tuple] = []
+
+    async def search_deals(self, query: str, postal_code: str) -> dict:
+        self.calls.append(("search_deals", query, postal_code))
+        return self._answer(self._deals)
+
+    async def weekly_ads(self, postal_code: str, merchant_name: str = "") -> dict:
+        self.calls.append(("weekly_ads", postal_code, merchant_name))
+        return self._answer(self._flyers)
+
+    async def flyer_items(self, flyer_id: int) -> dict:
+        self.calls.append(("flyer_items", flyer_id))
+        return self._answer(self._items)
+
+    def _answer(self, body: dict) -> dict:
+        if self.error:
+            raise self.error
+        return body

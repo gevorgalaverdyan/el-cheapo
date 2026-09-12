@@ -6,6 +6,7 @@ import pytest
 from elcheapo.agent.tools import make_tools
 from elcheapo.models import Expense
 from elcheapo.store.memory import InMemoryRepository
+from tests.fakes import FakeFlipp
 
 LOGGED = datetime(2026, 9, 12, tzinfo=timezone.utc)
 
@@ -256,3 +257,290 @@ def test_grouping_is_passed_through_to_the_report(exporting):
 
     book = load_workbook(io.BytesIO(documents[0].data))
     assert "By category" in book.sheetnames
+
+
+# --- Flipp deal tools --------------------------------------------------
+
+A_DEAL = {
+    "id": 9001,
+    "name": "Whole Chicken",
+    "flyer_id": 7788,
+    "valid_to": "2026-09-18T00:00:00Z",
+    "valid_from": "2026-09-12T00:00:00Z",
+    "image_url": "https://images.example/chicken.png",
+    "sale_story": "Save $3",
+    "category_l1": "Food",
+    "category_l2": "Meat",
+    "merchant_id": 42,
+    "merchant_name": "Loblaws",
+    "current_price": 5.99,
+    "original_price": 8.99,
+    "pre_price_text": "2 for",
+    "post_price_text": "/lb",
+}
+
+# Every field the real API can send as null, sent as null.
+A_SPARSE_DEAL = {
+    "id": 9002,
+    "name": "Store Brand Milk",
+    "flyer_id": 7789,
+    "valid_to": "2026-09-17T03:59:59+00:00",
+    "current_price": 4,
+    "original_price": None,
+    "pre_price_text": None,
+    "post_price_text": None,
+    "sale_story": None,
+    "merchant_name": "FreshCo",
+    "category_l1": "Food, Beverages & Tobacco",
+    "category_l2": "Food Items",
+}
+
+
+def deal_tools(flipp):
+    repository = InMemoryRepository(categories=["Groceries"])
+    return {
+        tool.__name__: tool
+        for tool in make_tools(repository, flipp=flipp)
+    }
+
+
+def test_the_deal_tools_are_absent_without_a_flipp_client():
+    by_name = deal_tools(None)
+
+    assert "search_deals" not in by_name
+
+
+def test_the_deal_tools_appear_when_flipp_is_configured():
+    by_name = deal_tools(FakeFlipp())
+
+    assert {"search_deals", "list_weekly_ads", "list_flyer_items"} <= set(by_name)
+
+
+async def test_searching_deals_passes_the_query_and_postal_code_through():
+    flipp = FakeFlipp()
+    by_name = deal_tools(flipp)
+
+    await by_name["search_deals"]("chicken", "M5V 2T6")
+
+    assert flipp.calls == [("search_deals", "chicken", "M5V 2T6")]
+
+
+async def test_a_deal_is_trimmed_to_what_the_agent_needs():
+    by_name = deal_tools(FakeFlipp(deals={"items": [A_DEAL], "total": 1}))
+
+    deal = (await by_name["search_deals"]("chicken", "M5V 2T6"))["deals"][0]
+
+    assert deal["name"] == "Whole Chicken"
+    assert deal["merchant"] == "Loblaws"
+    assert deal["was"] == "8.99"
+    assert deal["category"] == "Meat"
+    assert deal["flyer_id"] == 7788
+
+
+async def test_a_deal_drops_the_image_url_that_would_only_cost_context():
+    by_name = deal_tools(FakeFlipp(deals={"items": [A_DEAL], "total": 1}))
+
+    deal = (await by_name["search_deals"]("chicken", "M5V 2T6"))["deals"][0]
+
+    assert "image_url" not in deal
+
+
+async def test_a_price_carries_its_qualifiers_so_it_cannot_be_misread():
+    """A bare "5.99" reads as each when the flyer means two for that, per pound."""
+    by_name = deal_tools(FakeFlipp(deals={"items": [A_DEAL], "total": 1}))
+
+    deal = (await by_name["search_deals"]("chicken", "M5V 2T6"))["deals"][0]
+
+    assert deal["price"] == "2 for 5.99 /lb"
+
+
+async def test_a_long_post_price_note_is_kept_out_of_the_price():
+    """Flyers put marketing copy in that field -- "Available for Same-Day
+    delivery at a higher price." is not a unit, and reads as one."""
+    wordy = A_DEAL | {
+        "pre_price_text": None,
+        "post_price_text": "Available for Same-Day delivery at a higher price.",
+    }
+    by_name = deal_tools(FakeFlipp(deals={"items": [wordy], "total": 1}))
+
+    deal = (await by_name["search_deals"]("chicken", "M5V 2T6"))["deals"][0]
+
+    assert deal["price"] == "5.99"
+
+
+async def test_a_short_unit_note_stays_in_the_price():
+    per_pound = A_DEAL | {"pre_price_text": None, "post_price_text": "lb"}
+    by_name = deal_tools(FakeFlipp(deals={"items": [per_pound], "total": 1}))
+
+    deal = (await by_name["search_deals"]("chicken", "M5V 2T6"))["deals"][0]
+
+    assert deal["price"] == "5.99 lb"
+
+
+async def test_a_deal_that_is_not_marked_down_reports_no_previous_price():
+    plain = A_DEAL | {"original_price": 5.99}
+    by_name = deal_tools(FakeFlipp(deals={"items": [plain], "total": 1}))
+
+    deal = (await by_name["search_deals"]("chicken", "M5V 2T6"))["deals"][0]
+
+    assert deal["was"] == ""
+
+
+async def test_the_end_date_is_shortened_to_a_day():
+    by_name = deal_tools(FakeFlipp(deals={"items": [A_DEAL], "total": 1}))
+
+    deal = (await by_name["search_deals"]("chicken", "M5V 2T6"))["deals"][0]
+
+    assert deal["valid_to"] == "2026-09-18"
+
+
+async def test_searching_deals_stops_at_the_limit():
+    many = {"items": [A_DEAL] * 40, "total": 40}
+    by_name = deal_tools(FakeFlipp(deals=many))
+
+    result = await by_name["search_deals"]("chicken", "M5V 2T6", limit=3)
+
+    assert len(result["deals"]) == 3
+
+
+async def test_searching_deals_says_how_many_matched_in_total():
+    """Otherwise a capped list looks like the whole story."""
+    many = {"items": [A_DEAL] * 40, "total": 40}
+    by_name = deal_tools(FakeFlipp(deals=many))
+
+    result = await by_name["search_deals"]("chicken", "M5V 2T6", limit=3)
+
+    assert result["total_matching"] == 40
+
+
+async def test_a_flipp_failure_reaches_the_agent_as_an_error_it_can_relay():
+    from elcheapo.flipp import FlippError
+
+    flipp = FakeFlipp(error=FlippError("Flipp rate limit reached; wait a minute."))
+    by_name = deal_tools(flipp)
+
+    result = await by_name["search_deals"]("chicken", "M5V 2T6")
+
+    assert "rate limit" in result["error"]
+
+
+async def test_a_search_without_a_postal_code_is_refused_before_a_credit_is_spent():
+    flipp = FakeFlipp()
+    by_name = deal_tools(flipp)
+
+    result = await by_name["search_deals"]("chicken", "")
+
+    assert "error" in result
+    assert flipp.calls == []
+
+
+A_FLYER = {
+    "flyer_id": 7788,
+    "name": "Weekly Savings",
+    "merchant": "Loblaws",
+    "merchant_id": 42,
+    "valid_from": "2026-09-12T00:00:00-04:00",
+    "valid_to": "2026-09-18T23:59:59-04:00",
+    "categories": ["All Flyers", "Groceries"],
+    "thumbnail_url": "https://images.example/flyer.jpg",
+}
+
+
+async def test_weekly_ads_come_back_with_the_ids_needed_to_read_them():
+    by_name = deal_tools(FakeFlipp(flyers={"flyers": [A_FLYER], "total": 1}))
+
+    flyer = (await by_name["list_weekly_ads"]("M5V 2T6"))["flyers"][0]
+
+    assert flyer["flyer_id"] == 7788
+    assert flyer["merchant"] == "Loblaws"
+    assert flyer["valid_to"] == "2026-09-18"
+
+
+async def test_a_flyer_keeps_its_name_and_categories_to_choose_between_them():
+    """A postal code returns well over a hundred flyers, most of them
+    furniture and sporting goods. "Loblaws" alone does not say which."""
+    by_name = deal_tools(FakeFlipp(flyers={"flyers": [A_FLYER], "total": 1}))
+
+    flyer = (await by_name["list_weekly_ads"]("M5V 2T6"))["flyers"][0]
+
+    assert flyer["name"] == "Weekly Savings"
+    assert "Groceries" in flyer["categories"]
+
+
+async def test_weekly_ads_stop_at_the_limit():
+    """A real postal code returns about 150 flyers."""
+    by_name = deal_tools(FakeFlipp(flyers={"flyers": [A_FLYER] * 150, "total": 150}))
+
+    result = await by_name["list_weekly_ads"]("M5V 2T6", limit=5)
+
+    assert len(result["flyers"]) == 5
+    assert result["total_nearby"] == 150
+
+
+async def test_weekly_ads_pass_a_merchant_filter_through():
+    flipp = FakeFlipp()
+    by_name = deal_tools(flipp)
+
+    await by_name["list_weekly_ads"]("M5V 2T6", merchant_name="loblaws")
+
+    assert flipp.calls == [("weekly_ads", "M5V 2T6", "loblaws")]
+
+
+# A flyer item is a different shape from a search result: one price, as a
+# string, no merchant (the flyer says who), and no pre-sale price.
+A_FLYER_ITEM = {
+    "id": 1,
+    "name": "Whole Chicken",
+    "brand": "PC",
+    "price": "5.99",
+    "valid_from": "2026-09-12T00:00:00-04:00",
+    "valid_to": "2026-09-18T23:59:59-04:00",
+    "image_url": "https://images.example/chicken.png",
+    "flyer_id": 7788,
+}
+
+
+async def test_flyer_items_are_listed_for_one_flyer():
+    flipp = FakeFlipp(items={"items": [A_FLYER_ITEM], "total": 1})
+    by_name = deal_tools(flipp)
+
+    result = await by_name["list_flyer_items"](7788)
+
+    assert flipp.calls == [("flyer_items", 7788)]
+    item = result["items"][0]
+    assert item["name"] == "Whole Chicken"
+    assert item["brand"] == "PC"
+    assert item["price"] == "5.99"
+    assert item["valid_to"] == "2026-09-18"
+
+
+async def test_a_flyer_item_without_a_brand_says_nothing_rather_than_null():
+    unbranded = A_FLYER_ITEM | {"brand": None}
+    by_name = deal_tools(FakeFlipp(items={"items": [unbranded], "total": 1}))
+
+    item = (await by_name["list_flyer_items"](7788))["items"][0]
+
+    assert item["brand"] == ""
+
+
+async def test_flyer_items_stop_at_the_limit():
+    by_name = deal_tools(
+        FakeFlipp(items={"items": [A_FLYER_ITEM] * 60, "total": 60})
+    )
+
+    result = await by_name["list_flyer_items"](7788, limit=5)
+
+    assert len(result["items"]) == 5
+    assert result["total_in_flyer"] == 60
+
+
+async def test_a_deal_with_every_optional_field_null_still_reads_cleanly():
+    """The API sends null for sale_story, both price notes and original_price."""
+    by_name = deal_tools(FakeFlipp(deals={"items": [A_SPARSE_DEAL], "total": 1}))
+
+    deal = (await by_name["search_deals"]("milk", "M5V 2T6"))["deals"][0]
+
+    assert deal["price"] == "4.00"
+    assert deal["was"] == ""
+    assert deal["deal"] == ""
+    assert deal["name"] == "Store Brand Milk"

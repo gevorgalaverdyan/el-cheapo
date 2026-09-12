@@ -13,6 +13,7 @@ from datetime import date as Date
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 
+from elcheapo.flipp import Flipp, FlippError
 from elcheapo.models import Document, Expense, ExpenseQuery
 from elcheapo.reports import GROUPINGS, build_csv, build_xlsx
 from elcheapo.store.repository import ExpenseRepository
@@ -21,6 +22,12 @@ PROPOSE_EXPENSE = "propose_expense"
 LIST_CATEGORIES = "list_categories"
 QUERY_EXPENSES = "query_expenses"
 EXPORT_EXPENSES = "export_expenses"
+SEARCH_DEALS = "search_deals"
+LIST_WEEKLY_ADS = "list_weekly_ads"
+LIST_FLYER_ITEMS = "list_flyer_items"
+
+# Longer than this and a price qualifier is marketing copy, not a unit.
+MAX_PRICE_NOTE = 12
 
 FORMATS = {
     "xlsx": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
@@ -67,11 +74,16 @@ def make_tools(
     *,
     currency: str = "CAD",
     documents: list[Document] | None = None,
+    flipp: Flipp | None = None,
 ) -> list[Callable]:
     """Build the agent's tool set, bound to one user's data.
 
     `documents` collects files the agent generates. A tool can only return
     JSON, so the bytes are put here and the caller sends them.
+
+    The deal tools are only included when `flipp` is supplied. Without a
+    key they could only ever fail, and a tool that always fails is worse
+    than one the model never sees.
     """
     produced = documents if documents is not None else []
 
@@ -241,7 +253,114 @@ def make_tools(
             "total": f"{total:.2f}",
         }
 
-    return [propose_expense, list_categories, query_expenses, export_expenses]
+    async def search_deals(query: str, postal_code: str, limit: int = 10) -> dict:
+        """Search this week's store flyers for something on sale near the user.
+
+        Use this when the user asks what is on sale, what is cheap this week,
+        where something is cheapest, or whether a price is any good. Read-only,
+        and unrelated to the expenses they have recorded.
+
+        Args:
+            query: What to look for, one or two words. For example "chicken",
+                "olive oil", "diapers".
+            postal_code: The user's Canadian postal code like "M5V 2T6", or a
+                US ZIP like "95054". Ask the user for it. Never invent one.
+            limit: Most deals to return. Defaults to 10.
+
+        Returns:
+            total_matching and the deals -- each with its price, the merchant,
+            the day the offer ends, and a flyer_id for list_flyer_items. On
+            failure, an `error` to pass on to the user.
+        """
+        if not postal_code.strip():
+            # Refused here rather than sent: the call costs a credit and the
+            # API would only reject it.
+            return {"error": "postal_code is required. Ask the user where they shop."}
+
+        try:
+            body = await flipp.search_deals(query, postal_code.strip())
+        except FlippError as error:
+            # Returned rather than raised, like the other tools, so the agent
+            # can tell the user what went wrong instead of ending its turn.
+            return {"error": str(error)}
+
+        items = body.get("items") or []
+        return {
+            "total_matching": body.get("total", len(items)),
+            "postal_code": body.get("postal_code", postal_code.strip()),
+            "deals": [_as_deal(item) for item in items[:limit]],
+        }
+
+    async def list_weekly_ads(
+        postal_code: str, merchant_name: str = "", limit: int = 20
+    ) -> dict:
+        """List the store flyers running near the user this week.
+
+        Use this when the user asks which shops have a flyer out, or wants to
+        browse one store rather than search for a product. Each flyer comes
+        back with a flyer_id you can pass to list_flyer_items.
+
+        Args:
+            postal_code: The user's postal code or ZIP. Ask for it; never
+                invent one.
+            merchant_name: Part of a retailer name to narrow the list, such as
+                "loblaws". Empty string for every flyer, which is well over a
+                hundred in a city -- filter unless the user really wants all
+                of them.
+            limit: Most flyers to return. Defaults to 20.
+
+        Returns:
+            total_nearby and the flyers, each with its name, categories and a
+            flyer_id for list_flyer_items. On failure, an `error` to pass on
+            to the user.
+        """
+        if not postal_code.strip():
+            return {"error": "postal_code is required. Ask the user where they shop."}
+
+        try:
+            body = await flipp.weekly_ads(postal_code.strip(), merchant_name)
+        except FlippError as error:
+            return {"error": str(error)}
+
+        flyers = body.get("flyers") or []
+        return {
+            "total_nearby": body.get("total", len(flyers)),
+            "flyers": [_as_flyer(flyer) for flyer in flyers[:limit]],
+        }
+
+    async def list_flyer_items(flyer_id: int, limit: int = 25) -> dict:
+        """Read the sale items in one store flyer.
+
+        Use this after list_weekly_ads or search_deals has given you a
+        flyer_id, when the user wants to see what else is on sale at that shop.
+
+        Args:
+            flyer_id: The flyer to read, from list_weekly_ads or search_deals.
+                The items carry no merchant of their own -- the flyer is the
+                shop, so say which flyer you read.
+            limit: Most items to return. Defaults to 25. A flyer can run to
+                hundreds of items, so narrow down what the user wants rather
+                than raising this.
+
+        Returns:
+            total_in_flyer and the items, or an `error` to pass on to the user.
+        """
+        try:
+            body = await flipp.flyer_items(flyer_id)
+        except FlippError as error:
+            return {"error": str(error)}
+
+        items = body.get("items") or []
+        return {
+            "flyer_id": flyer_id,
+            "total_in_flyer": body.get("total", len(items)),
+            "items": [_as_flyer_item(item) for item in items[:limit]],
+        }
+
+    tools = [propose_expense, list_categories, query_expenses, export_expenses]
+    if flipp is not None:
+        tools += [search_deals, list_weekly_ads, list_flyer_items]
+    return tools
 
 
 def _as_dict(expense: Expense) -> dict:
@@ -285,3 +404,96 @@ def _safe_name(name: str) -> str:
     ]
     collapsed = "-".join(part for part in "".join(kept).split("-") if part)
     return collapsed[:60]
+
+
+def _as_deal(item: dict) -> dict:
+    """A flyer deal, cut down to what is worth spending context on.
+
+    The image url is the one worth naming: a search returns dozens of items and
+    every url is tokens the model can do nothing with.
+    """
+    return {
+        "name": item.get("name", ""),
+        "merchant": item.get("merchant_name", ""),
+        "price": _price_text(item),
+        "was": _was(item),
+        "deal": item.get("sale_story") or "",
+        "category": item.get("category_l2") or item.get("category_l1") or "",
+        "valid_to": _day(item.get("valid_to", "")),
+        "flyer_id": item.get("flyer_id"),
+    }
+
+
+def _as_flyer(flyer: dict) -> dict:
+    """One weekly ad. Note `merchant`, not `merchant_name` as a deal has."""
+    return {
+        "flyer_id": flyer.get("flyer_id"),
+        "merchant": flyer.get("merchant", ""),
+        # Flyer titles run to "Weekly Savings" or plain "Flyer", and the
+        # categories are what separates a grocery flyer from a furniture one.
+        "name": flyer.get("name", ""),
+        "categories": flyer.get("categories") or [],
+        "valid_from": _day(flyer.get("valid_from", "")),
+        "valid_to": _day(flyer.get("valid_to", "")),
+    }
+
+
+def _as_flyer_item(item: dict) -> dict:
+    """One item inside a flyer.
+
+    A different shape from a search result, despite the shared name: a
+    single `price` already formatted as a string, no pre-sale price, and no
+    merchant -- the flyer is the shop.
+    """
+    return {
+        "name": item.get("name", ""),
+        "brand": item.get("brand") or "",
+        "price": str(item.get("price") or ""),
+        "valid_to": _day(item.get("valid_to", "")),
+    }
+
+
+def _price_text(item: dict) -> str:
+    """The price with the words the flyer prints around it.
+
+    "5.99" on its own is a lie when the flyer says "2 for 5.99 /lb", and the
+    model cannot recover the qualifiers once they have been dropped.
+    """
+    parts = [
+        _note(item.get("pre_price_text")),
+        _amount(item.get("current_price")),
+        _note(item.get("post_price_text")),
+    ]
+    return " ".join(part for part in parts if part)
+
+
+def _note(text) -> str:
+    """A price qualifier, if that is what it is.
+
+    Retailers also use these fields for marketing copy -- one Costco item
+    ships "Available for Same-Day delivery at a higher price." as its
+    post-price text. Glued onto a number that reads as a unit, so anything
+    longer than a unit is dropped.
+    """
+    text = (text or "").strip()
+    return text if len(text) <= MAX_PRICE_NOTE else ""
+
+
+def _was(item: dict) -> str:
+    """The pre-sale price, or nothing when the item is not marked down."""
+    current, original = item.get("current_price"), item.get("original_price")
+    if current is None or original is None or original <= current:
+        return ""
+    return _amount(original)
+
+
+def _amount(value) -> str:
+    """Two decimal places, from whatever JSON gave us."""
+    if value is None:
+        return ""
+    return f"{Decimal(str(value)):.2f}"
+
+
+def _day(timestamp: str) -> str:
+    """The date out of an ISO timestamp. The agent never needs the time."""
+    return timestamp.split("T")[0] if timestamp else ""

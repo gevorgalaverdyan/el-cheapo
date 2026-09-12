@@ -12,6 +12,7 @@ from datetime import timedelta
 from elcheapo.agent.proposer import AgentProposer
 from elcheapo.channels.telegram.client import TelegramBot
 from elcheapo.config import Settings
+from elcheapo.flipp import Flipp
 from elcheapo.handler import ExpenseHandler
 from google.adk.sessions import DatabaseSessionService
 
@@ -37,6 +38,9 @@ async def run() -> None:
     print("database ready")
 
     repositories = PostgresRepositories(engine)
+    # No key means no deal tools, rather than tools that always fail.
+    flipp = Flipp(settings.flipp_api) if settings.flipp_api else None
+    print("flipp deals ready" if flipp else "no FLIPP_API -- deal tools off")
     # Conversations live in the same database as the expenses, so an open
     # card survives a restart instead of losing its context.
     sessions = DatabaseSessionService(db_url=async_url(settings.database_url))
@@ -52,6 +56,7 @@ async def run() -> None:
             timezone=settings.timezone,
             idle_timeout=timedelta(minutes=settings.session_idle_minutes),
             session_service=sessions,
+            flipp=flipp,
         ),
         currency=settings.currency,
     )

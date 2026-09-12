@@ -20,6 +20,7 @@ from google.genai import types
 from elcheapo.agent.agent import build_agent
 from elcheapo.agent.conversations import DEFAULT_IDLE_TIMEOUT, Conversations
 from elcheapo.agent.tools import PROPOSE_EXPENSE
+from elcheapo.flipp import Flipp
 from elcheapo.models import AgentReply, Attachment, Document, Draft, source_for
 from elcheapo.repositories import Repositories
 from elcheapo.retry import with_retries
@@ -43,6 +44,7 @@ class AgentProposer:
         timezone: str,
         idle_timeout: timedelta = DEFAULT_IDLE_TIMEOUT,
         session_service: BaseSessionService | None = None,
+        flipp: Flipp | None = None,
     ):
         # ADK reads credentials from the environment rather than taking them as
         # arguments, so an API key has to be published there before the agent runs.
@@ -54,6 +56,9 @@ class AgentProposer:
         self._repositories = repositories
         self._currency = currency
         self._zone = ZoneInfo(timezone)
+        # Shared across chats: the flyer data is public and depends only on
+        # the postal code the tool is given.
+        self._flipp = flipp
         # In-memory only when nothing better is supplied -- tests and the
         # receipt harness. Anything long-running passes a database-backed one.
         self._sessions = session_service or InMemorySessionService()
@@ -80,6 +85,7 @@ class AgentProposer:
                 categories=categories,
                 repository=repository,
                 documents=documents,
+                flipp=self._flipp,
             ),
             app_name=APP_NAME,
             session_service=self._sessions,
