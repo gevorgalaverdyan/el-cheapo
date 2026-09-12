@@ -40,6 +40,20 @@ class Draft(BaseModel):
     source: Source
 
 
+class Task(BaseModel):
+    """One item on a user's todo list.
+
+    `task_id` is the handle the agent uses to say which task it means --
+    a UUID the database generates, not a number the user ever types.
+    """
+
+    task_id: str
+    task: str
+    is_complete: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
 CategoryScope = Literal["platform", "user"]
 
 

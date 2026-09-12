@@ -5,7 +5,10 @@ interface the real Sheets repository will, which is the point: the handler
 cannot tell the difference.
 """
 
-from elcheapo.models import Category, Expense, ExpenseQuery
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from elcheapo.models import Category, Expense, ExpenseQuery, Task
 
 SEED_CATEGORIES = [
     "Groceries",
@@ -30,6 +33,7 @@ class InMemoryRepository:
         ]
         self._expenses: list[Expense] = []
         self._postal_code: str | None = None
+        self._tasks: list[Task] = []
 
     def categories(self) -> list[Category]:
         return list(self._categories)
@@ -60,6 +64,50 @@ class InMemoryRepository:
     def set_postal_code(self, code: str) -> None:
         self._postal_code = code
         print(f"[sheet] postal code: {code}")
+
+    def tasks(self, include_complete: bool = False) -> list[Task]:
+        return [
+            task
+            for task in self._tasks
+            if include_complete or not task.is_complete
+        ]
+
+    def add_task(self, task: str) -> Task:
+        now = datetime.now(timezone.utc)
+        created = Task(
+            task_id=str(uuid4()),
+            task=task,
+            created_at=now,
+            updated_at=now,
+        )
+        self._tasks.append(created)
+        print(f"[sheet] new task: {task}")
+        return created
+
+    def update_task(
+        self,
+        task_id: str,
+        *,
+        task: str | None = None,
+        is_complete: bool | None = None,
+    ) -> Task | None:
+        for index, existing in enumerate(self._tasks):
+            if existing.task_id != task_id:
+                continue
+            updated = existing.model_copy(
+                update={
+                    "task": existing.task if task is None else task,
+                    "is_complete": (
+                        existing.is_complete
+                        if is_complete is None
+                        else is_complete
+                    ),
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            )
+            self._tasks[index] = updated
+            return updated
+        return None
 
     @property
     def expenses(self) -> list[Expense]:

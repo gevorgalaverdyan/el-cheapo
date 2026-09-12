@@ -140,3 +140,18 @@ async def test_the_proposer_gives_the_agent_the_stored_postal_code(monkeypatch):
         await subject.propose(text="what is on sale", chat_id=1)
 
     assert seen["postal_code"] == "M5V 2T6"
+
+
+def test_the_instruction_covers_the_todo_list_even_without_a_flipp_key():
+    """The todo tools are always built, so the prompt must always describe them."""
+    instruction = an_agent().instruction
+
+    assert "add_task" in instruction
+    assert "list_tasks" in instruction
+
+
+def test_the_instruction_keeps_tasks_and_expenses_apart():
+    """"Remember to pay rent" is a task; it is not money that has been spent."""
+    instruction = an_agent().instruction.casefold()
+
+    assert "not an expense" in instruction or "not expenses" in instruction

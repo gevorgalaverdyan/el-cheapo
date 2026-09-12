@@ -15,7 +15,7 @@ from decimal import Decimal
 import sqlalchemy
 from sqlalchemy import text
 
-from elcheapo.models import Category, Expense, ExpenseQuery
+from elcheapo.models import Category, Expense, ExpenseQuery, Task
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +143,18 @@ class PostgresRepository:
         )
         return rows[0].postal_code if rows else None
 
+    def tasks(self, include_complete: bool = False) -> list[Task]:
+        rows = self._fetch(
+            f"""
+            SELECT task_id, task, is_complete, created_at, updated_at
+            FROM todos
+            WHERE uid = :uid{"" if include_complete else " AND NOT is_complete"}
+            ORDER BY created_at, task_id
+            """,
+            {"uid": self._uid},
+        )
+        return [_to_task(row) for row in rows]
+
     # --- writes ---------------------------------------------------------
 
     def add_category(self, name: str) -> None:
@@ -168,6 +180,48 @@ class PostgresRepository:
             """,
             {"uid": self._uid, "postal_code": code},
         )
+
+    def add_task(self, task: str) -> Task:
+        # RETURNING so the generated id and timestamps come back in the
+        # same round trip, rather than being read again afterwards.
+        rows = self._returning(
+            """
+            INSERT INTO todos (uid, task)
+            VALUES (:uid, :task)
+            RETURNING task_id, task, is_complete, created_at, updated_at
+            """,
+            {"uid": self._uid, "task": task},
+        )
+        return _to_task(rows[0])
+
+    def update_task(
+        self,
+        task_id: str,
+        *,
+        task: str | None = None,
+        is_complete: bool | None = None,
+    ) -> Task | None:
+        # COALESCE leaves a column alone when its parameter is NULL, so one
+        # statement covers renaming, completing, and both at once.
+        # The uid in the WHERE clause is what stops one chat editing
+        # another's task by guessing an id.
+        rows = self._returning(
+            """
+            UPDATE todos
+               SET task = COALESCE(:task, task),
+                   is_complete = COALESCE(:is_complete, is_complete),
+                   updated_at = now()
+             WHERE uid = :uid AND task_id = :task_id
+            RETURNING task_id, task, is_complete, created_at, updated_at
+            """,
+            {
+                "uid": self._uid,
+                "task_id": task_id,
+                "task": task,
+                "is_complete": is_complete,
+            },
+        )
+        return _to_task(rows[0]) if rows else None
 
     def append_expense(self, expense: Expense) -> None:
         # ON CONFLICT DO NOTHING makes a replayed Accept a no-op rather than a
@@ -205,6 +259,11 @@ class PostgresRepository:
         with self._engine.begin() as connection:
             connection.execute(text(sql), params)
 
+    def _returning(self, sql: str, params: dict):
+        """A write that hands rows back. Committed, unlike _fetch."""
+        with self._engine.begin() as connection:
+            return connection.execute(text(sql), params).fetchall()
+
 
 class PostgresRepositories:
     """Resolves a chat to its own repository."""
@@ -216,6 +275,16 @@ class PostgresRepositories:
         # The Telegram chat id is the account id until real accounts exist.
         # Nothing above this seam ever sees it.
         return PostgresRepository(self._engine, str(chat_id))
+
+
+def _to_task(row) -> Task:
+    return Task(
+        task_id=str(row.task_id),
+        task=row.task,
+        is_complete=row.is_complete,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 def _to_expense(row) -> Expense:

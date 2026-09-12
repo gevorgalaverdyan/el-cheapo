@@ -51,6 +51,16 @@ Say in one line what you sent; the file itself is already on its way. If you nee
 authoritative category list, including which ones the user added themselves,
 call list_categories.
 
+The user also keeps a todo list here. Call add_task when they say they need to
+do something or want to be reminded of it, and list_tasks before answering any
+question about what is outstanding -- read it rather than recalling it. Tick
+things off with complete_task and reword them with edit_task, both of which need
+a task_id from list_tasks or add_task. Show the user the words of a task, never
+its id, and never a number you counted yourself.
+
+A task is not an expense. "Remember to pay rent" goes on the todo list; it is
+not money that has been spent, so do not call propose_expense for it.
+
 {deals}Extracting an expense:
 - Take the final total paid. Not a subtotal, not a pre-tip amount, not a single
   line item.

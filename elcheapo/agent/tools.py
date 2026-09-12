@@ -10,11 +10,12 @@ declarations the model sees from them, so they are part of the prompt.
 """
 
 from datetime import date as Date
+from uuid import UUID
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 
 from elcheapo.flipp import Flipp, FlippError
-from elcheapo.models import Document, Expense, ExpenseQuery
+from elcheapo.models import Document, Expense, ExpenseQuery, Task
 from elcheapo.postal import normalise
 from elcheapo.reports import GROUPINGS, build_csv, build_xlsx
 from elcheapo.store.repository import ExpenseRepository
@@ -27,6 +28,16 @@ SEARCH_DEALS = "search_deals"
 LIST_WEEKLY_ADS = "list_weekly_ads"
 LIST_FLYER_ITEMS = "list_flyer_items"
 REMEMBER_POSTAL_CODE = "remember_postal_code"
+ADD_TASK = "add_task"
+LIST_TASKS = "list_tasks"
+COMPLETE_TASK = "complete_task"
+EDIT_TASK = "edit_task"
+
+# Said the same way wherever a task id does not match, so the agent learns
+# one recovery rather than three.
+_NO_SUCH_TASK = (
+    "No task with that id. Call list_tasks to see what is actually there."
+)
 
 # Longer than this and a price qualifier is marketing copy, not a unit.
 MAX_PRICE_NOTE = 12
@@ -255,6 +266,87 @@ def make_tools(
             "total": f"{total:.2f}",
         }
 
+    async def add_task(task: str) -> dict:
+        """Put something on the user's todo list.
+
+        Call this when they ask to be reminded of something, say they need to
+        do something, or hand you a list of things to keep. This is a plain
+        todo list -- it has nothing to do with their spending.
+
+        Args:
+            task: What they have to do, in their own words. For example
+                "call the vet" or "buy oat milk".
+
+        Returns:
+            The stored task and its task_id, or an `error` to explain.
+        """
+        if not task.strip():
+            return {"error": "A task needs some words. Ask what they want to remember."}
+
+        return _as_task(repository.add_task(task.strip()))
+
+    async def list_tasks(include_complete: bool = False) -> dict:
+        """Read the user's todo list. Read-only.
+
+        Call this before answering anything about what they have to do, and
+        whenever you need a task_id to finish or change something. Answer from
+        what it returns rather than from memory of an earlier turn.
+
+        Args:
+            include_complete: Whether to include tasks already finished.
+                Defaults to False, which is the list they usually mean.
+
+        Returns:
+            count and the tasks, oldest first, each with a task_id. Show the
+            user the words, never the task_id.
+        """
+        tasks = repository.tasks(include_complete=include_complete)
+        return {"count": len(tasks), "tasks": [_as_task(task) for task in tasks]}
+
+    async def complete_task(task_id: str, done: bool = True) -> dict:
+        """Tick a task off, or put it back if it was ticked off by mistake.
+
+        Args:
+            task_id: The id from list_tasks or add_task. Not the words of the
+                task, and not a number you counted yourself.
+            done: True to finish it, False to reopen one already finished.
+
+        Returns:
+            The task as it now stands, or an `error` if there is no such task.
+        """
+        if not _is_task_id(task_id):
+            return {"error": _NO_SUCH_TASK}
+
+        updated = repository.update_task(task_id, is_complete=done)
+        if updated is None:
+            return {"error": _NO_SUCH_TASK}
+        return _as_task(updated)
+
+    async def edit_task(task_id: str, task: str) -> dict:
+        """Reword a task, leaving it open or finished as it was.
+
+        Use this when the user corrects or adds detail to something already on
+        the list. To add a different task, call add_task instead.
+
+        Args:
+            task_id: The id from list_tasks or add_task.
+            task: The new wording, complete -- it replaces the old words
+                rather than being added to them.
+
+        Returns:
+            The task as it now stands, or an `error` if there is no such task.
+        """
+        if not task.strip():
+            return {"error": "A task needs some words. Nothing was changed."}
+
+        if not _is_task_id(task_id):
+            return {"error": _NO_SUCH_TASK}
+
+        updated = repository.update_task(task_id, task=task.strip())
+        if updated is None:
+            return {"error": _NO_SUCH_TASK}
+        return _as_task(updated)
+
     def where_to_search(given: str) -> str:
         """The postal code to search with.
 
@@ -419,7 +511,16 @@ def make_tools(
             "items": [_as_flyer_item(item) for item in items[:limit]],
         }
 
-    tools = [propose_expense, list_categories, query_expenses, export_expenses]
+    tools = [
+        propose_expense,
+        list_categories,
+        query_expenses,
+        export_expenses,
+        add_task,
+        list_tasks,
+        complete_task,
+        edit_task,
+    ]
     if flipp is not None:
         tools += [
             search_deals,
@@ -471,6 +572,31 @@ def _safe_name(name: str) -> str:
     ]
     collapsed = "-".join(part for part in "".join(kept).split("-") if part)
     return collapsed[:60]
+
+
+def _is_task_id(task_id: str) -> bool:
+    """Whether this could be a task id at all.
+
+    Checked before the database rather than by it: Postgres answers a malformed
+    uuid with an error, which would end the agent's turn, where a plain "no such
+    task" lets it call list_tasks and correct itself. A model that invents "3"
+    or "the milk one" is the expected case, not a rare one.
+    """
+    try:
+        UUID(task_id)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
+
+
+def _as_task(task: Task) -> dict:
+    """JSON-safe view of a task. datetime does not serialise."""
+    return {
+        "task_id": task.task_id,
+        "task": task.task,
+        "is_complete": task.is_complete,
+        "created_at": task.created_at.date().isoformat(),
+    }
 
 
 def _as_deal(item: dict) -> dict:

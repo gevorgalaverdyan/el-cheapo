@@ -32,6 +32,15 @@ class FakeExpenseRepository:
     def recent_draft_ids(self, limit: int = 200) -> set[str]:
         return {expense.draft_id for expense in self.expenses[-limit:]}
 
+    def tasks(self, include_complete: bool = False):
+        return []
+
+    def add_task(self, task: str):
+        raise NotImplementedError("no handler test needs the todo list")
+
+    def update_task(self, task_id, *, task=None, is_complete=None):
+        return None
+
     def postal_code(self) -> str | None:
         return self._postal_code
 

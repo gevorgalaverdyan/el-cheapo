@@ -46,6 +46,10 @@ def test_the_agent_is_given_the_expected_tools(tools):
         "list_categories",
         "query_expenses",
         "export_expenses",
+        "add_task",
+        "list_tasks",
+        "complete_task",
+        "edit_task",
     }
 
 
@@ -620,3 +624,160 @@ async def test_weekly_ads_also_use_the_remembered_postal_code():
     await by_name["list_weekly_ads"]()
 
     assert flipp.calls == [("weekly_ads", "M5V 2T6", "")]
+
+
+# --- the todo list -----------------------------------------------------
+
+
+def todo_tools(repository=None):
+    repository = repository or InMemoryRepository(categories=["Groceries"])
+    return {
+        tool.__name__: tool for tool in make_tools(repository)
+    }, repository
+
+
+def test_the_todo_tools_do_not_need_a_flipp_key():
+    by_name, _ = todo_tools()
+
+    assert {"add_task", "list_tasks", "complete_task", "edit_task"} <= set(by_name)
+
+
+async def test_adding_a_task_stores_it():
+    by_name, repository = todo_tools()
+
+    await by_name["add_task"]("buy milk")
+
+    assert [task.task for task in repository.tasks()] == ["buy milk"]
+
+
+async def test_adding_a_task_returns_the_id_needed_to_change_it_later():
+    by_name, repository = todo_tools()
+
+    result = await by_name["add_task"]("buy milk")
+
+    assert result["task_id"] == repository.tasks()[0].task_id
+
+
+async def test_an_empty_task_is_refused_rather_than_stored():
+    by_name, repository = todo_tools()
+
+    result = await by_name["add_task"]("   ")
+
+    assert "error" in result
+    assert repository.tasks() == []
+
+
+async def test_listing_tasks_returns_what_was_added():
+    by_name, _ = todo_tools()
+    await by_name["add_task"]("buy milk")
+    await by_name["add_task"]("call the vet")
+
+    result = await by_name["list_tasks"]()
+
+    assert [task["task"] for task in result["tasks"]] == ["buy milk", "call the vet"]
+
+
+async def test_listing_tasks_hides_finished_ones_by_default():
+    by_name, _ = todo_tools()
+    added = await by_name["add_task"]("buy milk")
+    await by_name["complete_task"](added["task_id"])
+
+    assert (await by_name["list_tasks"]())["tasks"] == []
+
+
+async def test_finished_tasks_can_be_asked_for():
+    by_name, _ = todo_tools()
+    added = await by_name["add_task"]("buy milk")
+    await by_name["complete_task"](added["task_id"])
+
+    result = await by_name["list_tasks"](include_complete=True)
+
+    assert result["tasks"][0]["is_complete"] is True
+
+
+async def test_completing_a_task_marks_it_done():
+    by_name, repository = todo_tools()
+    added = await by_name["add_task"]("buy milk")
+
+    await by_name["complete_task"](added["task_id"])
+
+    assert repository.tasks(include_complete=True)[0].is_complete is True
+
+
+async def test_a_task_can_be_reopened_when_it_was_not_really_done():
+    by_name, repository = todo_tools()
+    added = await by_name["add_task"]("buy milk")
+    await by_name["complete_task"](added["task_id"])
+
+    await by_name["complete_task"](added["task_id"], done=False)
+
+    assert repository.tasks()[0].is_complete is False
+
+
+async def test_completing_a_task_that_does_not_exist_says_so():
+    by_name, _ = todo_tools()
+
+    result = await by_name["complete_task"]("no-such-id")
+
+    assert "error" in result
+
+
+async def test_editing_a_task_changes_its_words():
+    by_name, repository = todo_tools()
+    added = await by_name["add_task"]("buy milk")
+
+    await by_name["edit_task"](added["task_id"], "buy oat milk")
+
+    assert repository.tasks()[0].task == "buy oat milk"
+
+
+async def test_editing_a_task_that_does_not_exist_says_so():
+    by_name, _ = todo_tools()
+
+    result = await by_name["edit_task"]("no-such-id", "buy oat milk")
+
+    assert "error" in result
+
+
+async def test_editing_a_task_to_nothing_is_refused():
+    by_name, repository = todo_tools()
+    added = await by_name["add_task"]("buy milk")
+
+    result = await by_name["edit_task"](added["task_id"], "  ")
+
+    assert "error" in result
+    assert repository.tasks()[0].task == "buy milk"
+
+
+class RecordingTasks(InMemoryRepository):
+    """Notices when a tool reaches storage with an id it should have refused."""
+
+    def __init__(self):
+        super().__init__(categories=["Groceries"])
+        self.update_calls: list[str] = []
+
+    def update_task(self, task_id, *, task=None, is_complete=None):
+        self.update_calls.append(task_id)
+        return super().update_task(task_id, task=task, is_complete=is_complete)
+
+
+async def test_an_id_that_is_not_an_id_never_reaches_storage():
+    """Postgres answers a malformed uuid with an error, not an empty result --
+    which would end the turn instead of letting the agent correct itself."""
+    repository = RecordingTasks()
+    by_name, _ = todo_tools(repository)
+
+    result = await by_name["complete_task"]("the milk one")
+
+    assert "error" in result
+    assert repository.update_calls == []
+
+
+async def test_editing_with_a_malformed_id_is_refused_the_same_way():
+    repository = RecordingTasks()
+    by_name, _ = todo_tools(repository)
+
+    result = await by_name["edit_task"]("3", "buy oat milk")
+
+    assert "error" in result
+    assert repository.update_calls == []

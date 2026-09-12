@@ -64,6 +64,23 @@ STATEMENTS = [
     CREATE INDEX IF NOT EXISTS expenses_uid_category_idx
         ON expenses (uid, lower(category))
     """,
+    # gen_random_uuid() is built into Postgres 13 and later, so the id is
+    # the database's to hand out -- nothing upstream invents one.
+    """
+    CREATE TABLE IF NOT EXISTS todos (
+        task_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        uid         TEXT NOT NULL,
+        task        TEXT NOT NULL,
+        is_complete BOOLEAN NOT NULL DEFAULT false,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    # Every read is one user's open tasks, oldest first.
+    """
+    CREATE INDEX IF NOT EXISTS todos_uid_open_idx
+        ON todos (uid, is_complete, created_at)
+    """,
     # One row per user, holding what they have told us about themselves.
     # uid is the chat id as text, as it is in the two tables above.
     # postal_code is nullable: a user who has never been asked has none.
