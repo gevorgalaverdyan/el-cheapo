@@ -1,14 +1,14 @@
 """Test doubles. Nothing here ships."""
 
-from elcheapo.models import Category, Expense
+from elcheapo.models import AgentReply, Category, Expense, ExpenseQuery
 
 
-class FakeSheetsRepository:
+class FakeExpenseRepository:
     """In-memory stand-in for the workbook, recording the order of writes."""
 
     def __init__(self, categories: list[str] | None = None):
         self._categories = [
-            Category(name=name, created_by="seed") for name in (categories or [])
+            Category(name=name, scope="platform") for name in (categories or [])
         ]
         self.expenses: list[Expense] = []
         self.calls: list[str] = []
@@ -19,7 +19,7 @@ class FakeSheetsRepository:
 
     def add_category(self, name: str) -> None:
         self.calls.append(f"add_category:{name}")
-        self._categories.append(Category(name=name, created_by="agent"))
+        self._categories.append(Category(name=name, scope="user"))
 
     def append_expense(self, expense: Expense) -> None:
         self.calls.append(f"append_expense:{expense.draft_id}")
@@ -30,6 +30,11 @@ class FakeSheetsRepository:
 
     def recent_draft_ids(self, limit: int = 200) -> set[str]:
         return {expense.draft_id for expense in self.expenses[-limit:]}
+
+    def query(self, query: ExpenseQuery) -> list[Expense]:
+        matching = [e for e in self.expenses if query.matches(e)]
+        matching.sort(key=lambda e: (e.date, e.logged_at), reverse=True)
+        return matching[: query.limit]
 
 
 class FakeTelegramBot:
@@ -78,9 +83,10 @@ class FakeTelegramBot:
 class StubProposer:
     """Returns a fixed draft, so handler tests never touch a model."""
 
-    def __init__(self, draft=None, error: Exception | None = None):
+    def __init__(self, draft=None, error: Exception | None = None, reply: str = ""):
         self._draft = draft
         self._error = error
+        self._reply = reply
         self.seen: list[str] = []
         self.attachments: list = []
 
@@ -89,4 +95,4 @@ class StubProposer:
         self.attachments.append(attachment)
         if self._error is not None:
             raise self._error
-        return self._draft
+        return AgentReply(draft=self._draft, text=self._reply)

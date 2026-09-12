@@ -1,86 +1,88 @@
-"""Turning a message into a proposed expense, using Gemini.
+"""Running the ADK agent for one chat turn.
 
-This is the only component that talks to a model, and the only thing it can do
-is return a Draft. It has no access to the workbook's write path.
+Each Telegram chat gets an ADK session, so the agent sees the last few turns
+and a correction like "make it 45" lands as a revision rather than a fresh
+guess. Sessions are conversational convenience only -- every durable fact
+lives in the card payload or the database.
 """
 
+import logging
+import os
 import secrets
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Callable
 from zoneinfo import ZoneInfo
 
-from google import genai
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from pydantic import BaseModel
 
-from elcheapo.models import Attachment, Draft, source_for
+from elcheapo.agent.agent import build_agent
+from elcheapo.agent.tools import PROPOSE_EXPENSE
+from elcheapo.models import AgentReply, Attachment, Draft, source_for
+from elcheapo.repositories import Repositories
 from elcheapo.retry import with_retries
 
-INSTRUCTION = """You read short messages about personal spending and extract one expense.
+log = logging.getLogger(__name__)
 
-Today is {today} and amounts are in {currency} unless the user names another currency.
-
-Rules:
-- `is_expense` is false if the message is not about money the user spent.
-- Choose `category` from this list when one fits: {categories}
-- Only invent a new category name when nothing on the list is a reasonable fit.
-- `amount` is a plain decimal string, no currency symbol, e.g. "45.20".
-- `date` is YYYY-MM-DD. Resolve "yesterday" and "last night" against today's date.
-- `merchant` is the shop or place, empty if not mentioned.
-- `note` is any extra detail worth keeping, usually empty.
-
-Receipts and photos:
-- Take the final total paid, not a subtotal and not an individual line item.
-- Read the merchant from the receipt header.
-- Use the date printed on the receipt when it is legible, otherwise today.
-
-Voice notes: transcribe, then apply the same rules.
-"""
-
-NO_WORDS = "Extract the expense from this receipt or recording." 
+APP_NAME = "elcheapo"
+NO_WORDS = "Extract the expense from this receipt or recording."
 
 
-class ProposedExpense(BaseModel):
-    """The model's structured reply."""
+class AgentProposer:
+    """Turns a chat message into a proposed expense, via the ADK agent."""
 
-    is_expense: bool
-    amount: str = ""
-    category: str = ""
-    merchant: str = ""
-    note: str = ""
-    date: str = ""
-
-
-class GeminiProposer:
     def __init__(
         self,
         *,
         api_key: str,
         model: str,
-        categories_for: Callable[[int], list[str]],
+        repositories: Repositories,
         currency: str,
         timezone: str,
     ):
-        self._client = genai.Client(api_key=api_key)
+        # ADK reads credentials from the environment rather than taking them as
+        # arguments, so an API key has to be published there before the agent runs.
+        if api_key:
+            os.environ.setdefault("GOOGLE_API_KEY", api_key)
+            os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "FALSE")
+
         self._model = model
-        self._categories_for = categories_for
+        self._repositories = repositories
         self._currency = currency
         self._zone = ZoneInfo(timezone)
+        self._sessions = InMemorySessionService()
 
     async def propose(
         self, *, text: str, chat_id: int, attachment: Attachment | None = None
-    ) -> Draft | None:
+    ) -> AgentReply:
         if not text.strip() and attachment is None:
-            return None
+            return AgentReply()
 
-        categories = self._categories_for(chat_id)
+        repository = self._repositories.for_chat(chat_id)
+        categories = [category.name for category in repository.categories()]
         today = datetime.now(self._zone).date()
+
+        runner = Runner(
+            agent=build_agent(
+                model=self._model,
+                today=today.isoformat(),
+                currency=self._currency,
+                categories=categories,
+                repository=repository,
+            ),
+            app_name=APP_NAME,
+            session_service=self._sessions,
+        )
+
+        user_id = str(chat_id)
+        session_id = f"chat-{chat_id}"
+        await self._ensure_session(user_id, session_id)
 
         parts = []
         if attachment is not None:
-            # Gemini reads the image or hears the audio directly -- no OCR
-            # service and no transcription service in between.
+            # Read by the model directly -- no OCR service and no transcription
+            # service in between.
             parts.append(
                 types.Part.from_bytes(
                     data=attachment.data, mime_type=attachment.mime_type
@@ -88,65 +90,92 @@ class GeminiProposer:
             )
         parts.append(types.Part.from_text(text=text.strip() or NO_WORDS))
 
-        async def call():
-            return await self._client.aio.models.generate_content(
-                model=self._model,
-                contents=parts,
-                config=types.GenerateContentConfig(
-                    system_instruction=INSTRUCTION.format(
-                        today=today.isoformat(),
-                        currency=self._currency,
-                        categories=", ".join(categories) or "(none yet)",
-                    ),
-                    response_mime_type="application/json",
-                    response_schema=ProposedExpense,
-                    # We ask for a structured reply, never tool calls. Saying so
-                    # explicitly silences the SDK's automatic-function-calling notice.
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                        disable=True
-                    ),
-                ),
-            )
+        async def run() -> tuple[dict | None, str]:
+            proposal = None
+            answer = ""
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=types.Content(role="user", parts=parts),
+            ):
+                proposal = _proposal_in(event) or proposal
+                answer = _text_in(event) or answer
+            return proposal, answer
 
-        response = await with_retries(call)
+        proposal, answer = await with_retries(run)
 
-        return self._to_draft(
-            response.parsed,
-            categories,
-            today,
-            source_for(attachment.mime_type if attachment else None),
+        return AgentReply(
+            draft=self._to_draft(proposal, categories, today, attachment),
+            text=answer,
         )
 
-    def _to_draft(self, proposed, categories: list[str], today, source) -> Draft | None:
-        if proposed is None or not proposed.is_expense:
+    async def _ensure_session(self, user_id: str, session_id: str) -> None:
+        existing = await self._sessions.get_session(
+            app_name=APP_NAME, user_id=user_id, session_id=session_id
+        )
+        if existing is None:
+            await self._sessions.create_session(
+                app_name=APP_NAME, user_id=user_id, session_id=session_id
+            )
+
+    def _to_draft(
+        self,
+        proposal: dict | None,
+        categories: list[str],
+        today,
+        attachment: Attachment | None,
+    ) -> Draft | None:
+        if not proposal:
             return None
 
         try:
-            amount = Decimal(proposed.amount)
+            amount = Decimal(str(proposal.get("amount", "")).strip())
         except (InvalidOperation, TypeError):
+            log.warning("unparseable amount from agent: %r", proposal.get("amount"))
             return None
         if amount <= 0:
             return None
 
-        category = (proposed.category or "Other").strip()
+        category = (proposal.get("category") or "Other").strip()
         known = {name.casefold() for name in categories}
 
         return Draft(
             draft_id=secrets.token_urlsafe(4),
             amount=amount,
             category=category,
-            # Decided here rather than trusted from the model, so the card's
-            # "new category" flag always reflects the actual sheet.
+            # Decided here, not trusted from the model, so the card's "new
+            # category" flag always reflects what is actually stored.
             is_new_category=category.casefold() not in known,
-            merchant=proposed.merchant or "",
-            note=proposed.note or "",
-            date=_parse_date(proposed.date, today),
-            source=source,
+            merchant=(proposal.get("merchant") or "").strip(),
+            note=(proposal.get("note") or "").strip(),
+            date=_parse_date(proposal.get("date"), today),
+            source=source_for(attachment.mime_type if attachment else None),
         )
 
 
-def _parse_date(value: str, fallback):
+def _proposal_in(event) -> dict | None:
+    """The arguments of a propose_expense call, if this event carries one."""
+    content = getattr(event, "content", None)
+    for part in getattr(content, "parts", None) or []:
+        call = getattr(part, "function_call", None)
+        if call is not None and call.name == PROPOSE_EXPENSE:
+            return dict(call.args or {})
+    return None
+
+
+def _text_in(event) -> str:
+    """Any prose the agent produced in this event."""
+    content = getattr(event, "content", None)
+    pieces = [
+        part.text.strip()
+        for part in (getattr(content, "parts", None) or [])
+        if getattr(part, "text", None) and part.text.strip()
+    ]
+    return " ".join(pieces)
+
+
+def _parse_date(value, fallback):
     try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
     except (ValueError, TypeError):
         return fallback

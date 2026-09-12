@@ -65,7 +65,7 @@ and fix.
 | `command router` | Handles `/`-prefixed messages deterministically, no model call. |
 | `agent` (ADK `LlmAgent`) | Interprets free-form input; calls proposal and read tools. |
 | `card` module | Renders drafts as Telegram messages; encodes/decodes the hidden payload. |
-| `SheetsRepository` | All spreadsheet reads and writes, behind an interface. |
+| `ExpenseRepository` | All spreadsheet reads and writes, behind an interface. |
 | `bootstrap` | One-off script that creates the formatted workbook. |
 
 ### 5.2 Request flow
@@ -351,7 +351,7 @@ elcheapo/
     tools.py          # propose_expense, search_expenses, summarize
     prompt.py         # instruction template
   sheets/
-    repository.py     # SheetsRepository interface + Google implementation
+    repository.py     # ExpenseRepository interface + Google implementation
     bootstrap.py      # workbook creation script
 tests/
 ```
@@ -375,7 +375,7 @@ Test-driven, with seams placed so that most logic is testable without network ac
 
 - **Pure functions:** payload encode/decode round-trip, schema validation,
   date resolution against a fixed timezone, category matching, card rendering.
-- **Repository:** `SheetsRepository` is an interface; a fake backs all handler
+- **Repository:** `ExpenseRepository` is an interface; a fake backs all handler
   and command tests.
 - **Handlers:** webhook auth, allowlist rejection, update deduplication, draft
   targeting rules, and commit idempotency, all against the fake repository.

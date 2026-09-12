@@ -5,7 +5,7 @@ interface the real Sheets repository will, which is the point: the handler
 cannot tell the difference.
 """
 
-from elcheapo.models import Category, Expense
+from elcheapo.models import Category, Expense, ExpenseQuery
 
 SEED_CATEGORIES = [
     "Groceries",
@@ -22,10 +22,10 @@ SEED_CATEGORIES = [
 ]
 
 
-class InMemorySheetsRepository:
+class InMemoryRepository:
     def __init__(self, categories: list[str] | None = None):
         self._categories = [
-            Category(name=name, created_by="seed")
+            Category(name=name, scope="platform")
             for name in (categories if categories is not None else SEED_CATEGORIES)
         ]
         self._expenses: list[Expense] = []
@@ -34,7 +34,7 @@ class InMemorySheetsRepository:
         return list(self._categories)
 
     def add_category(self, name: str) -> None:
-        self._categories.append(Category(name=name, created_by="agent"))
+        self._categories.append(Category(name=name, scope="user"))
         print(f"[sheet] new category: {name}")
 
     def append_expense(self, expense: Expense) -> None:
@@ -46,6 +46,12 @@ class InMemorySheetsRepository:
 
     def recent_draft_ids(self, limit: int = 200) -> set[str]:
         return {expense.draft_id for expense in self._expenses[-limit:]}
+
+    def query(self, query: ExpenseQuery) -> list[Expense]:
+        matching = [e for e in self._expenses if query.matches(e)]
+        # Newest first, with logged_at breaking ties between same-day rows.
+        matching.sort(key=lambda e: (e.date, e.logged_at), reverse=True)
+        return matching[: query.limit]
 
     @property
     def expenses(self) -> list[Expense]:

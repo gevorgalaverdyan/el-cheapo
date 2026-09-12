@@ -18,10 +18,11 @@ from pathlib import Path
 
 import pytest
 
-from elcheapo.agent.proposer import GeminiProposer
+from elcheapo.agent.proposer import AgentProposer
 from elcheapo.config import Settings
 from elcheapo.models import Attachment
-from elcheapo.sheets.memory import SEED_CATEGORIES
+from elcheapo.repositories import SingleUserRepositories
+from elcheapo.store.memory import InMemoryRepository
 
 RECEIPTS = Path(__file__).parent / "fixtures" / "receipts"
 MANIFEST = json.loads((RECEIPTS / "manifest.json").read_text(encoding="utf-8"))
@@ -33,16 +34,16 @@ pytestmark = pytest.mark.live
 
 
 @pytest.fixture
-def proposer() -> GeminiProposer:
+def proposer() -> AgentProposer:
     settings = Settings()
     if not settings.gemini_api_key:
         pytest.skip("GEMINI_API_KEY is not set")
     # Function-scoped: the SDK's transport binds to the event loop that created
     # it, and pytest-asyncio gives each test a fresh loop.
-    return GeminiProposer(
+    return AgentProposer(
         api_key=settings.gemini_api_key,
         model=settings.gemini_model,
-        categories_for=lambda _: SEED_CATEGORIES,
+        repositories=SingleUserRepositories(InMemoryRepository()),
         currency=settings.currency,
         timezone=settings.timezone,
     )

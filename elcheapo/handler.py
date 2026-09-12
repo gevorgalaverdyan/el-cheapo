@@ -14,7 +14,7 @@ from elcheapo.channels.telegram.cards import (
 from elcheapo.channels.telegram.media import attachment_in
 from elcheapo.channels.telegram.payload import PayloadError
 from elcheapo.commit import commit_expense
-from elcheapo.models import Attachment, Draft
+from elcheapo.models import AgentReply, Attachment
 from elcheapo.repositories import Repositories
 from elcheapo.updates import chat_id_of
 
@@ -54,7 +54,7 @@ class Bot(Protocol):
 class Proposer(Protocol):
     async def propose(
         self, *, text: str, chat_id: int, attachment: Attachment | None = None
-    ) -> Draft | None: ...
+    ) -> AgentReply: ...
 
 
 class ExpenseHandler:
@@ -103,7 +103,7 @@ class ExpenseHandler:
             attachment = Attachment(data=data, mime_type=mime_type)
 
         try:
-            draft = await self._proposer.propose(
+            reply = await self._proposer.propose(
                 text=text, chat_id=chat_id, attachment=attachment
             )
         except Exception:  # noqa: BLE001 - the user gets an answer either way
@@ -111,12 +111,14 @@ class ExpenseHandler:
             await self._bot.send_message(chat_id, MODEL_UNAVAILABLE)
             return
 
-        if draft is None:
-            await self._bot.send_message(chat_id, COULD_NOT_READ)
+        if reply.draft is not None:
+            card = render_card(reply.draft, currency=self._currency)
+            await self._bot.send_message(chat_id, card.text, card.reply_markup)
             return
 
-        card = render_card(draft, currency=self._currency)
-        await self._bot.send_message(chat_id, card.text, card.reply_markup)
+        # No expense, but the agent may have answered a question -- a query
+        # tool's result arrives here as prose.
+        await self._bot.send_message(chat_id, reply.text or COULD_NOT_READ)
 
     async def _handle_callback(self, callback: dict) -> None:
         # Acknowledged first so the client spinner clears even if the work below

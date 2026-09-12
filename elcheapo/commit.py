@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from elcheapo.models import Draft, Expense
-from elcheapo.sheets.repository import SheetsRepository
+from elcheapo.store.repository import ExpenseRepository
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class CommitResult:
     duplicate: bool = False
 
 
-def commit_expense(draft: Draft, repo: SheetsRepository, *, now: datetime) -> CommitResult:
+def commit_expense(draft: Draft, repo: ExpenseRepository, *, now: datetime) -> CommitResult:
     """Append `draft` as an expense, creating its category first if needed.
 
     Safe to retry: a draft already present in the sheet is a no-op, so a
@@ -43,7 +43,7 @@ def commit_expense(draft: Draft, repo: SheetsRepository, *, now: datetime) -> Co
     return CommitResult(committed=True)
 
 
-def _resolve_category(name: str, repo: SheetsRepository) -> str:
+def _resolve_category(name: str, repo: ExpenseRepository) -> str:
     """Return the canonical category name, creating it if it does not exist.
 
     Creation happens before the expense is appended so the sheet's validation

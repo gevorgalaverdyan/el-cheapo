@@ -8,11 +8,11 @@ no caller has ever seen a spreadsheet id.
 
 from typing import Protocol
 
-from elcheapo.sheets.repository import SheetsRepository
+from elcheapo.store.repository import ExpenseRepository
 
 
 class Repositories(Protocol):
-    def for_chat(self, chat_id: int) -> SheetsRepository:
+    def for_chat(self, chat_id: int) -> ExpenseRepository:
         """The workbook belonging to this chat."""
         ...
 
@@ -20,8 +20,8 @@ class Repositories(Protocol):
 class SingleUserRepositories:
     """One workbook, owned by the operator. The hackathon configuration."""
 
-    def __init__(self, repository: SheetsRepository):
+    def __init__(self, repository: ExpenseRepository):
         self._repository = repository
 
-    def for_chat(self, chat_id: int) -> SheetsRepository:
+    def for_chat(self, chat_id: int) -> ExpenseRepository:
         return self._repository

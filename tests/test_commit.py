@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from elcheapo.commit import commit_expense
 from elcheapo.models import Draft
-from tests.fakes import FakeSheetsRepository
+from tests.fakes import FakeExpenseRepository
 
 NOW = datetime(2026, 9, 12, 18, 4, 11, tzinfo=timezone.utc)
 
@@ -24,7 +24,7 @@ def a_draft(**overrides) -> Draft:
 
 
 def test_a_draft_becomes_an_expense_row():
-    repo = FakeSheetsRepository(categories=["Groceries"])
+    repo = FakeExpenseRepository(categories=["Groceries"])
 
     commit_expense(a_draft(), repo, now=NOW)
 
@@ -34,7 +34,7 @@ def test_a_draft_becomes_an_expense_row():
 
 
 def test_the_row_records_when_it_was_logged():
-    repo = FakeSheetsRepository(categories=["Groceries"])
+    repo = FakeExpenseRepository(categories=["Groceries"])
 
     commit_expense(a_draft(), repo, now=NOW)
 
@@ -42,7 +42,7 @@ def test_the_row_records_when_it_was_logged():
 
 
 def test_a_new_category_is_created_before_the_expense_that_uses_it():
-    repo = FakeSheetsRepository(categories=["Dining"])
+    repo = FakeExpenseRepository(categories=["Dining"])
 
     commit_expense(a_draft(category="Groceries", is_new_category=True), repo, now=NOW)
 
@@ -50,7 +50,7 @@ def test_a_new_category_is_created_before_the_expense_that_uses_it():
 
 
 def test_an_existing_category_is_not_recreated():
-    repo = FakeSheetsRepository(categories=["Groceries"])
+    repo = FakeExpenseRepository(categories=["Groceries"])
 
     commit_expense(a_draft(category="Groceries", is_new_category=True), repo, now=NOW)
 
@@ -58,7 +58,7 @@ def test_an_existing_category_is_not_recreated():
 
 
 def test_category_matching_ignores_case_and_surrounding_space():
-    repo = FakeSheetsRepository(categories=["Groceries"])
+    repo = FakeExpenseRepository(categories=["Groceries"])
 
     commit_expense(a_draft(category=" groceries ", is_new_category=True), repo, now=NOW)
 
@@ -66,7 +66,7 @@ def test_category_matching_ignores_case_and_surrounding_space():
 
 
 def test_committing_the_same_draft_twice_writes_one_row():
-    repo = FakeSheetsRepository(categories=["Groceries"])
+    repo = FakeExpenseRepository(categories=["Groceries"])
     draft = a_draft()
 
     first = commit_expense(draft, repo, now=NOW)
@@ -79,7 +79,7 @@ def test_committing_the_same_draft_twice_writes_one_row():
 
 
 def test_a_failed_append_can_be_retried_successfully():
-    repo = FakeSheetsRepository(categories=["Groceries"])
+    repo = FakeExpenseRepository(categories=["Groceries"])
     repo.append_failures = 1
     draft = a_draft()
 

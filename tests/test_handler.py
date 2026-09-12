@@ -5,7 +5,7 @@ from elcheapo.channels.telegram.cards import render_card
 from elcheapo.handler import ExpenseHandler
 from elcheapo.models import Draft
 from elcheapo.repositories import SingleUserRepositories
-from tests.fakes import FakeSheetsRepository, FakeTelegramBot, StubProposer
+from tests.fakes import FakeExpenseRepository, FakeTelegramBot, StubProposer
 
 CHAT = 111
 NOW = datetime(2026, 9, 12, 18, 4, 11, tzinfo=timezone.utc)
@@ -26,13 +26,13 @@ def a_draft(**overrides) -> Draft:
     return Draft(**fields)
 
 
-def make_handler(proposal: Draft | None = None, categories=("Groceries",), error=None):
-    repo = FakeSheetsRepository(categories=list(categories))
+def make_handler(proposal: Draft | None = None, categories=("Groceries",), error=None, reply=""):
+    repo = FakeExpenseRepository(categories=list(categories))
     bot = FakeTelegramBot()
     handler = ExpenseHandler(
         bot=bot,
         repositories=SingleUserRepositories(repo),
-        proposer=StubProposer(proposal, error=error),
+        proposer=StubProposer(proposal, error=error, reply=reply),
         currency="CAD",
         clock=lambda: NOW,
     )
@@ -275,3 +275,31 @@ async def test_a_message_with_nothing_readable_never_reaches_the_model():
 
     assert proposer.seen == []
     assert len(bot.sent) == 1
+
+
+async def test_an_answer_from_the_agent_is_sent_to_the_user():
+    handler, bot, repo = make_handler(reply="You have spent 88.75 on Dining this month.")
+
+    await handler.handle(a_text_update("how much on dining?"))
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["text"] == "You have spent 88.75 on Dining this month."
+    assert bot.sent[0]["reply_markup"] is None
+
+
+async def test_a_card_wins_over_any_accompanying_chatter():
+    handler, bot, repo = make_handler(proposal=a_draft(), reply="Here you go.")
+
+    await handler.handle(a_text_update())
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["reply_markup"] is not None
+
+
+async def test_silence_from_the_agent_still_gets_a_reply():
+    handler, bot, repo = make_handler(proposal=None, reply="")
+
+    await handler.handle(a_text_update("mmm"))
+
+    assert len(bot.sent) == 1
+    assert "couldn't read" in bot.sent[0]["text"]

@@ -5,10 +5,10 @@ Everything above this interface is testable without credentials or network.
 
 from typing import Protocol
 
-from elcheapo.models import Category, Expense
+from elcheapo.models import Category, Expense, ExpenseQuery
 
 
-class SheetsRepository(Protocol):
+class ExpenseRepository(Protocol):
     """Reads and writes for the expense workbook."""
 
     def categories(self) -> list[Category]:
@@ -25,4 +25,8 @@ class SheetsRepository(Protocol):
 
     def recent_draft_ids(self, limit: int = 200) -> set[str]:
         """Draft ids from the most recent rows, for idempotency checks."""
+        ...
+
+    def query(self, query: ExpenseQuery) -> list[Expense]:
+        """Matching expenses, newest first."""
         ...

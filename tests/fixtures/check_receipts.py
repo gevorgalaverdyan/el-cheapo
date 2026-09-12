@@ -12,10 +12,11 @@ import json
 from decimal import Decimal
 from pathlib import Path
 
-from elcheapo.agent.proposer import GeminiProposer
+from elcheapo.agent.proposer import AgentProposer
 from elcheapo.config import Settings
 from elcheapo.models import Attachment
-from elcheapo.sheets.memory import SEED_CATEGORIES
+from elcheapo.repositories import SingleUserRepositories
+from elcheapo.store.memory import InMemoryRepository
 
 RECEIPTS = Path(__file__).parent / "receipts"
 
@@ -35,10 +36,10 @@ async def main() -> None:
     settings = Settings()
     manifest = json.loads((RECEIPTS / "manifest.json").read_text(encoding="utf-8"))
 
-    proposer = GeminiProposer(
+    proposer = AgentProposer(
         api_key=settings.gemini_api_key,
         model=settings.gemini_model,
-        categories_for=lambda _: SEED_CATEGORIES,
+        repositories=SingleUserRepositories(InMemoryRepository()),
         currency=settings.currency,
         timezone=settings.timezone,
     )

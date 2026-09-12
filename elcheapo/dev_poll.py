@@ -8,12 +8,12 @@ what you exercise here is the real code path.
 
 import asyncio
 
-from elcheapo.agent.proposer import GeminiProposer
+from elcheapo.agent.proposer import AgentProposer
 from elcheapo.channels.telegram.client import TelegramBot
 from elcheapo.config import Settings
 from elcheapo.handler import ExpenseHandler
 from elcheapo.repositories import SingleUserRepositories
-from elcheapo.sheets.memory import InMemorySheetsRepository
+from elcheapo.store.memory import InMemoryRepository
 from elcheapo.updates import chat_id_of
 
 
@@ -24,18 +24,16 @@ async def run() -> None:
     me = await bot.get_me()
     print(f"connected as @{me['username']}")
 
-    repository = InMemorySheetsRepository()
+    repository = InMemoryRepository()
     repositories = SingleUserRepositories(repository)
 
     handler = ExpenseHandler(
         bot=bot,
         repositories=repositories,
-        proposer=GeminiProposer(
+        proposer=AgentProposer(
             api_key=settings.gemini_api_key,
             model=settings.gemini_model,
-            categories_for=lambda chat_id: [
-                category.name for category in repositories.for_chat(chat_id).categories()
-            ],
+            repositories=repositories,
             currency=settings.currency,
             timezone=settings.timezone,
         ),
