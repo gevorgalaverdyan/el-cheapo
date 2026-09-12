@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Minutes of silence after which a chat starts a fresh conversation.
     session_idle_minutes: int = 15
 
+    # Declared so .env.example stays honest. Nothing reads it yet.
+    flipp_api: str = ""
+
     @field_validator("allowed_chat_ids", mode="before")
     @classmethod
     def _split_chat_ids(cls, value):

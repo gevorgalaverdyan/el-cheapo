@@ -26,13 +26,13 @@ def a_draft(**overrides) -> Draft:
     return Draft(**fields)
 
 
-def make_handler(proposal: Draft | None = None, categories=("Groceries",), error=None, reply=""):
+def make_handler(proposal: Draft | None = None, categories=("Groceries",), error=None, reply="", document=None):
     repo = FakeExpenseRepository(categories=list(categories))
     bot = FakeTelegramBot()
     handler = ExpenseHandler(
         bot=bot,
         repositories=SingleUserRepositories(repo),
-        proposer=StubProposer(proposal, error=error, reply=reply),
+        proposer=StubProposer(proposal, error=error, reply=reply, document=document),
         currency="CAD",
         clock=lambda: NOW,
     )
@@ -363,3 +363,49 @@ async def test_an_ordinary_message_still_reaches_the_model():
 
     assert proposer.resets == []
     assert len(proposer.seen) == 1
+
+
+def a_document():
+    from elcheapo.models import Document
+
+    return Document(filename="expenses.xlsx", data=b"PKfake", caption="")
+
+
+async def test_a_generated_file_is_sent_to_the_user():
+    handler, bot, _ = make_handler(document=a_document())
+
+    await handler.handle(a_text_update("send me a spreadsheet"))
+
+    assert len(bot.documents) == 1
+    assert bot.documents[0]["filename"] == "expenses.xlsx"
+    assert bot.documents[0]["data"] == b"PKfake"
+
+
+async def test_the_agents_words_become_the_file_caption():
+    handler, bot, _ = make_handler(
+        document=a_document(), reply="Here are your 12 dining expenses."
+    )
+
+    await handler.handle(a_text_update("spreadsheet please"))
+
+    assert bot.documents[0]["caption"] == "Here are your 12 dining expenses."
+    # The caption carries the text, so no separate message is needed.
+    assert bot.sent == []
+
+
+async def test_an_overlong_caption_is_trimmed_to_telegrams_limit():
+    handler, bot, _ = make_handler(document=a_document(), reply="x" * 2000)
+
+    await handler.handle(a_text_update("spreadsheet please"))
+
+    assert len(bot.documents[0]["caption"]) <= 1024
+
+
+async def test_a_file_and_a_card_can_arrive_together():
+    handler, bot, _ = make_handler(proposal=a_draft(), document=a_document())
+
+    await handler.handle(a_text_update("log it and send me the sheet"))
+
+    assert len(bot.documents) == 1
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["reply_markup"] is not None

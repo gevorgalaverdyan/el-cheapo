@@ -20,7 +20,7 @@ from google.genai import types
 from elcheapo.agent.agent import build_agent
 from elcheapo.agent.conversations import DEFAULT_IDLE_TIMEOUT, Conversations
 from elcheapo.agent.tools import PROPOSE_EXPENSE
-from elcheapo.models import AgentReply, Attachment, Draft, source_for
+from elcheapo.models import AgentReply, Attachment, Document, Draft, source_for
 from elcheapo.repositories import Repositories
 from elcheapo.retry import with_retries
 
@@ -69,6 +69,9 @@ class AgentProposer:
         categories = [category.name for category in repository.categories()]
         today = datetime.now(self._zone).date()
 
+        # Files the agent generates this turn land here.
+        documents: list[Document] = []
+
         runner = Runner(
             agent=build_agent(
                 model=self._model,
@@ -76,6 +79,7 @@ class AgentProposer:
                 currency=self._currency,
                 categories=categories,
                 repository=repository,
+                documents=documents,
             ),
             app_name=APP_NAME,
             session_service=self._sessions,
@@ -115,6 +119,7 @@ class AgentProposer:
         return AgentReply(
             draft=self._to_draft(proposal, categories, today, attachment),
             text=answer,
+            document=documents[-1] if documents else None,
         )
 
     def reset(self, chat_id: int) -> None:

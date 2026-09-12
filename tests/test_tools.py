@@ -40,7 +40,12 @@ def tools():
 def test_the_agent_is_given_the_expected_tools(tools):
     by_name, _ = tools
 
-    assert set(by_name) == {"propose_expense", "list_categories", "query_expenses"}
+    assert set(by_name) == {
+        "propose_expense",
+        "list_categories",
+        "query_expenses",
+        "export_expenses",
+    }
 
 
 def test_list_categories_returns_platform_and_user_categories(tools):
@@ -142,3 +147,112 @@ def test_a_query_matching_nothing_is_an_empty_result_not_an_error(tools):
     assert result["count"] == 0
     assert result["total"] == "0.00"
     assert result["expenses"] == []
+
+
+# --- export ------------------------------------------------------------
+
+@pytest.fixture
+def exporting():
+    repository = InMemoryRepository(categories=["Dining", "Groceries"])
+    for expense in [
+        an_expense(1, "12.00", "Dining", "Tim Hortons"),
+        an_expense(3, "85.40", "Groceries", "Loblaws"),
+        an_expense(5, "45.00", "Dining", "Kinton Ramen"),
+    ]:
+        repository.append_expense(expense)
+    documents = []
+    tools = {t.__name__: t for t in make_tools(repository, currency="CAD", documents=documents)}
+    return tools["export_expenses"], documents
+
+
+def test_export_is_offered_as_a_tool(tools):
+    by_name, _ = tools
+
+    assert "export_expenses" in by_name
+
+
+def test_exporting_produces_a_spreadsheet_by_default(exporting):
+    export, documents = exporting
+
+    export()
+
+    assert documents[0].filename.endswith(".xlsx")
+
+
+def test_exporting_as_csv_when_asked(exporting):
+    export, documents = exporting
+
+    export(format="csv")
+
+    assert documents[0].filename.endswith(".csv")
+    assert documents[0].data.startswith(b"\xef\xbb\xbf")  # BOM for Excel
+
+
+def test_the_export_reports_what_it_contains(exporting):
+    export, _ = exporting
+
+    result = export()
+
+    assert result["rows"] == 3
+    assert result["total"] == "142.40"
+
+
+def test_filters_narrow_the_export(exporting):
+    export, _ = exporting
+
+    result = export(category="Dining")
+
+    assert result["rows"] == 2
+    assert result["total"] == "57.00"
+
+
+def test_the_agent_can_name_the_file(exporting):
+    export, documents = exporting
+
+    export(filename="september dining")
+
+    assert documents[0].filename == "september-dining.xlsx"
+
+
+def test_a_dangerous_filename_is_made_safe(exporting):
+    export, documents = exporting
+
+    export(filename="../../etc/passwd")
+
+    assert "/" not in documents[0].filename
+    assert ".." not in documents[0].filename
+
+
+def test_an_unknown_format_is_reported_not_raised(exporting):
+    export, documents = exporting
+
+    result = export(format="pdf")
+
+    assert "error" in result
+    assert documents == []
+
+
+def test_an_unknown_grouping_is_reported(exporting):
+    export, _ = exporting
+
+    assert "error" in export(group_by="colour")
+
+
+def test_exporting_nothing_explains_itself_instead_of_sending_an_empty_file(exporting):
+    export, documents = exporting
+
+    result = export(category="Rent")
+
+    assert "error" in result
+    assert documents == []
+
+
+def test_grouping_is_passed_through_to_the_report(exporting):
+    import io
+    from openpyxl import load_workbook
+
+    export, documents = exporting
+    export(group_by="category")
+
+    book = load_workbook(io.BytesIO(documents[0].data))
+    assert "By category" in book.sheetnames

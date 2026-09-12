@@ -40,6 +40,9 @@ RESET_DONE = (
 
 RESET = "/reset"
 
+# Telegram truncates anything longer, so the tail would be lost silently.
+MAX_CAPTION = 1024
+
 
 class Bot(Protocol):
     async def send_message(
@@ -52,6 +55,10 @@ class Bot(Protocol):
 
     async def answer_callback_query(
         self, callback_query_id: str, text: str = ""
+    ) -> None: ...
+
+    async def send_document(
+        self, chat_id: int, filename: str, data: bytes, caption: str = ""
     ) -> None: ...
 
     async def download(self, file_id: str) -> bytes: ...
@@ -126,9 +133,22 @@ class ExpenseHandler:
             await self._bot.send_message(chat_id, MODEL_UNAVAILABLE)
             return
 
+        if reply.document is not None:
+            # The agent's words ride along as the caption rather than arriving
+            # as a separate message above the file.
+            await self._bot.send_document(
+                chat_id,
+                reply.document.filename,
+                reply.document.data,
+                reply.text[:MAX_CAPTION],
+            )
+
         if reply.draft is not None:
             card = render_card(reply.draft, currency=self._currency)
             await self._bot.send_message(chat_id, card.text, card.reply_markup)
+            return
+
+        if reply.document is not None:
             return
 
         # No expense, but the agent may have answered a question -- a query

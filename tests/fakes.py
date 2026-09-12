@@ -44,6 +44,7 @@ class FakeTelegramBot:
         self.sent: list[dict] = []
         self.edited: list[dict] = []
         self.answered: list[str] = []
+        self.documents: list[dict] = []
         self.downloaded: list[str] = []
         self.files: dict[str, bytes] = {}
         self.download_error: Exception | None = None
@@ -73,6 +74,13 @@ class FakeTelegramBot:
     ) -> None:
         self.answered.append(callback_query_id)
 
+    async def send_document(
+        self, chat_id: int, filename: str, data: bytes, caption: str = ""
+    ) -> None:
+        self.documents.append(
+            {"chat_id": chat_id, "filename": filename, "data": data, "caption": caption}
+        )
+
     async def download(self, file_id: str) -> bytes:
         self.downloaded.append(file_id)
         if self.download_error is not None:
@@ -83,10 +91,11 @@ class FakeTelegramBot:
 class StubProposer:
     """Returns a fixed draft, so handler tests never touch a model."""
 
-    def __init__(self, draft=None, error: Exception | None = None, reply: str = ""):
+    def __init__(self, draft=None, error: Exception | None = None, reply: str = "", document=None):
         self._draft = draft
         self._error = error
         self._reply = reply
+        self._document = document
         self.seen: list[str] = []
         self.attachments: list = []
         self.resets: list[int] = []
@@ -96,7 +105,9 @@ class StubProposer:
         self.attachments.append(attachment)
         if self._error is not None:
             raise self._error
-        return AgentReply(draft=self._draft, text=self._reply)
+        return AgentReply(
+            draft=self._draft, text=self._reply, document=self._document
+        )
 
     def reset(self, chat_id: int) -> None:
         self.resets.append(chat_id)

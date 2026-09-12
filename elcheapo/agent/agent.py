@@ -3,6 +3,7 @@
 from google.adk.agents import LlmAgent
 
 from elcheapo.agent.tools import make_tools
+from elcheapo.models import Document
 from elcheapo.store.repository import ExpenseRepository
 
 INSTRUCTION = """You are ElCheapo, a terse assistant that logs personal spending.
@@ -15,7 +16,14 @@ in a voice note -- call propose_expense. Never claim to have saved anything: the
 user sees a card and confirms it themselves.
 
 When the user asks about what they have already spent, call query_expenses and
-answer from what it returns. Never estimate or invent figures. If you need the
+answer from what it returns. Never estimate or invent figures.
+
+When they ask for a file, a report, a spreadsheet or an export, call
+export_expenses. Pick xlsx for something they will read and csv for raw data,
+and group by category, month or merchant when a breakdown is what they asked
+for. Always name the file after what is in it -- "september dining", "groceries
+2026", "expenses over 50" -- so it is recognisable later in the chat history.
+Say in one line what you sent; the file itself is already on its way. If you need the
 authoritative category list, including which ones the user added themselves,
 call list_categories.
 
@@ -43,6 +51,7 @@ def build_agent(
     currency: str,
     categories: list[str],
     repository: ExpenseRepository,
+    documents: list[Document] | None = None,
 ) -> LlmAgent:
     """Build the agent for one user.
 
@@ -63,5 +72,5 @@ def build_agent(
             categories=", ".join(categories) or "(none yet)",
         ),
         description="Logs personal expenses from chat messages, receipts and voice notes.",
-        tools=make_tools(repository),
+        tools=make_tools(repository, currency=currency, documents=documents),
     )

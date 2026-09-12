@@ -132,3 +132,15 @@ class AgentReply:
 
     draft: "Draft | None" = None
     text: str = ""
+    document: "Document | None" = None
+
+
+@dataclass(frozen=True)
+class Document:
+    """A file the agent produced, on its way to the user."""
+
+    filename: str
+    data: bytes
+    caption: str = ""
+
+

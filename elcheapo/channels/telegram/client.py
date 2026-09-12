@@ -54,6 +54,29 @@ class TelegramBot:
             "answerCallbackQuery", {"callback_query_id": callback_query_id, "text": text}
         )
 
+    async def send_document(
+        self, chat_id: int, filename: str, data: bytes, caption: str = ""
+    ) -> None:
+        """Upload a file to the chat. Multipart, not JSON, so it has its own path."""
+        form = {"chat_id": str(chat_id)}
+        if caption:
+            form["caption"] = caption
+        try:
+            response = await self._client.post(
+                f"{API_ROOT}/bot{self._token}/sendDocument",
+                data=form,
+                files={"document": (filename, data)},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TelegramError(redact(str(error), self._token)) from None
+
+        body = response.json()
+        if not body.get("ok"):
+            raise TelegramError(
+                redact(f"sendDocument failed: {body.get('description')}", self._token)
+            )
+
     async def get_updates(self, offset: int | None = None, timeout: int = 30) -> list[dict]:
         payload: dict = {"timeout": timeout}
         if offset is not None:
