@@ -14,7 +14,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-from elcheapo.models import Draft
+from elcheapo.models import Attachment, Draft, source_for
 from elcheapo.retry import with_retries
 
 INSTRUCTION = """You read short messages about personal spending and extract one expense.
@@ -29,7 +29,16 @@ Rules:
 - `date` is YYYY-MM-DD. Resolve "yesterday" and "last night" against today's date.
 - `merchant` is the shop or place, empty if not mentioned.
 - `note` is any extra detail worth keeping, usually empty.
+
+Receipts and photos:
+- Take the final total paid, not a subtotal and not an individual line item.
+- Read the merchant from the receipt header.
+- Use the date printed on the receipt when it is legible, otherwise today.
+
+Voice notes: transcribe, then apply the same rules.
 """
+
+NO_WORDS = "Extract the expense from this receipt or recording." 
 
 
 class ProposedExpense(BaseModel):
@@ -59,17 +68,30 @@ class GeminiProposer:
         self._currency = currency
         self._zone = ZoneInfo(timezone)
 
-    async def propose(self, *, text: str, chat_id: int) -> Draft | None:
-        if not text.strip():
+    async def propose(
+        self, *, text: str, chat_id: int, attachment: Attachment | None = None
+    ) -> Draft | None:
+        if not text.strip() and attachment is None:
             return None
 
         categories = self._categories_for(chat_id)
         today = datetime.now(self._zone).date()
 
+        parts = []
+        if attachment is not None:
+            # Gemini reads the image or hears the audio directly -- no OCR
+            # service and no transcription service in between.
+            parts.append(
+                types.Part.from_bytes(
+                    data=attachment.data, mime_type=attachment.mime_type
+                )
+            )
+        parts.append(types.Part.from_text(text=text.strip() or NO_WORDS))
+
         async def call():
             return await self._client.aio.models.generate_content(
                 model=self._model,
-                contents=text,
+                contents=parts,
                 config=types.GenerateContentConfig(
                     system_instruction=INSTRUCTION.format(
                         today=today.isoformat(),
@@ -88,9 +110,14 @@ class GeminiProposer:
 
         response = await with_retries(call)
 
-        return self._to_draft(response.parsed, categories, today)
+        return self._to_draft(
+            response.parsed,
+            categories,
+            today,
+            source_for(attachment.mime_type if attachment else None),
+        )
 
-    def _to_draft(self, proposed, categories: list[str], today) -> Draft | None:
+    def _to_draft(self, proposed, categories: list[str], today, source) -> Draft | None:
         if proposed is None or not proposed.is_expense:
             return None
 
@@ -114,7 +141,7 @@ class GeminiProposer:
             merchant=proposed.merchant or "",
             note=proposed.note or "",
             date=_parse_date(proposed.date, today),
-            source="text",
+            source=source,
         )
 
 

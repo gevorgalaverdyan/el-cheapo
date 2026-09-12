@@ -5,9 +5,22 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
+from dataclasses import dataclass
+
 from pydantic import BaseModel, Field
 
 Source = Literal["text", "image", "voice"]
+
+
+def source_for(mime_type: str | None) -> Source:
+    """Which kind of input an attachment counts as, for the sheet's audit column."""
+    if not mime_type:
+        return "text"
+    if mime_type.startswith("audio/"):
+        return "voice"
+    if mime_type.startswith("image/") or mime_type == "application/pdf":
+        return "image"
+    return "text"
 
 
 class Draft(BaseModel):
@@ -47,3 +60,15 @@ class Expense(BaseModel):
     source: Source
     logged_at: datetime
     draft_id: str
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """Bytes from a chat message, handed to the model as-is.
+
+    Gemini reads images and hears audio natively, so there is no OCR or
+    transcription step between here and the proposal.
+    """
+
+    data: bytes
+    mime_type: str

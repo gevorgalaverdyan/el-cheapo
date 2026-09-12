@@ -1,0 +1,122 @@
+[
+  {
+    "file": "loblaws_groceries.jpg",
+    "mime_type": "image/jpeg",
+    "tests": "total vs subtotal, printed date",
+    "expect": {
+      "amount": "38.36",
+      "merchant": "Loblaws",
+      "date": "2026-09-10"
+    }
+  },
+  {
+    "file": "tim_hortons_coffee.png",
+    "mime_type": "image/png",
+    "tests": "small simple receipt",
+    "expect": {
+      "amount": "4.52",
+      "merchant": "Tim Hortons",
+      "date": "2026-09-11"
+    }
+  },
+  {
+    "file": "restaurant_with_tip.jpg",
+    "mime_type": "image/jpeg",
+    "tests": "tip line -- must take the final total, not the pre-tip one",
+    "expect": {
+      "amount": "97.75",
+      "merchant": "Canoe",
+      "date": "2026-09-06"
+    }
+  },
+  {
+    "file": "petro_canada_gas.pdf",
+    "mime_type": "application/pdf",
+    "tests": "PDF, fuel receipt with per-litre pricing",
+    "expect": {
+      "amount": "71.84",
+      "merchant": "Petro-Canada",
+      "date": "2026-09-08"
+    }
+  },
+  {
+    "file": "amazon_invoice.pdf",
+    "mime_type": "application/pdf",
+    "tests": "emailed invoice layout, order date vs delivery date",
+    "expect": {
+      "amount": "156.43",
+      "merchant": "Amazon",
+      "date": "2026-09-02"
+    }
+  },
+  {
+    "file": "faded_thermal.jpg",
+    "mime_type": "image/jpeg",
+    "tests": "low contrast thermal print, blurred -- robustness",
+    "expect": {
+      "amount": "23.10",
+      "merchant": "Shoppers Drug Mart",
+      "date": null
+    }
+  },
+  {
+    "file": "sideways_photo.jpg",
+    "mime_type": "image/jpeg",
+    "tests": "photographed sideways -- rotation robustness",
+    "expect": {
+      "amount": "18.75",
+      "merchant": "Kinton Ramen",
+      "date": null
+    }
+  },
+  {
+    "file": "handwritten_note.png",
+    "mime_type": "image/png",
+    "tests": "scrap of paper, no structure at all",
+    "expect": {
+      "amount": "34.00",
+      "merchant": null,
+      "date": null
+    }
+  },
+  {
+    "file": "presto_transit.png",
+    "mime_type": "image/png",
+    "tests": "transit top-up -- category inference without an obvious merchant type",
+    "expect": {
+      "amount": "40.00",
+      "merchant": "PRESTO",
+      "date": "2026-09-09"
+    }
+  },
+  {
+    "file": "usd_receipt.jpg",
+    "mime_type": "image/jpeg",
+    "tests": "foreign currency on a single-currency setup -- what does it do?",
+    "expect": {
+      "amount": "45.00",
+      "merchant": "Blue Bottle Coffee",
+      "date": null
+    }
+  },
+  {
+    "file": "no_date_receipt.png",
+    "mime_type": "image/png",
+    "tests": "no date printed -- should fall back to today",
+    "expect": {
+      "amount": "12.99",
+      "merchant": "Book City",
+      "date": null
+    }
+  },
+  {
+    "file": "not_an_expense.jpg",
+    "mime_type": "image/jpeg",
+    "tests": "a poster, not a receipt -- should extract nothing",
+    "expect": {
+      "amount": null,
+      "merchant": null,
+      "date": null
+    }
+  }
+]

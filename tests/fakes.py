@@ -39,6 +39,9 @@ class FakeTelegramBot:
         self.sent: list[dict] = []
         self.edited: list[dict] = []
         self.answered: list[str] = []
+        self.downloaded: list[str] = []
+        self.files: dict[str, bytes] = {}
+        self.download_error: Exception | None = None
 
     async def send_message(
         self, chat_id: int, text: str, reply_markup: dict | None = None
@@ -65,6 +68,12 @@ class FakeTelegramBot:
     ) -> None:
         self.answered.append(callback_query_id)
 
+    async def download(self, file_id: str) -> bytes:
+        self.downloaded.append(file_id)
+        if self.download_error is not None:
+            raise self.download_error
+        return self.files.get(file_id, b"fake-bytes")
+
 
 class StubProposer:
     """Returns a fixed draft, so handler tests never touch a model."""
@@ -73,9 +82,11 @@ class StubProposer:
         self._draft = draft
         self._error = error
         self.seen: list[str] = []
+        self.attachments: list = []
 
-    async def propose(self, *, text: str, chat_id: int):
+    async def propose(self, *, text: str, chat_id: int, attachment=None):
         self.seen.append(text)
+        self.attachments.append(attachment)
         if self._error is not None:
             raise self._error
         return self._draft

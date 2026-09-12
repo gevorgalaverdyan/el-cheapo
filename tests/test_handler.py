@@ -39,6 +39,11 @@ def make_handler(proposal: Draft | None = None, categories=("Groceries",), error
     return handler, bot, repo
 
 
+def make_handler_with_proposer(**kwargs):
+    handler, bot, repo = make_handler(**kwargs)
+    return handler, bot, repo, handler._proposer
+
+
 def a_text_update(text: str = "lunch 45.20 seoudi") -> dict:
     return {
         "update_id": 1,
@@ -189,3 +194,84 @@ async def test_a_failed_commit_tells_the_user_to_try_again():
     assert repo.expenses == []
     # The card keeps its buttons so Accept can simply be tapped again.
     assert bot.sent and "again" in bot.sent[-1]["text"].lower()
+
+
+def a_photo_update(caption: str | None = None) -> dict:
+    message = {
+        "message_id": 9,
+        "chat": {"id": CHAT},
+        "photo": [
+            {"file_id": "thumb", "width": 90},
+            {"file_id": "full", "width": 1280},
+        ],
+    }
+    if caption is not None:
+        message["caption"] = caption
+    return {"update_id": 3, "message": message}
+
+
+def a_voice_update() -> dict:
+    return {
+        "update_id": 4,
+        "message": {
+            "message_id": 9,
+            "chat": {"id": CHAT},
+            "voice": {"file_id": "voice1", "mime_type": "audio/ogg", "duration": 4},
+        },
+    }
+
+
+async def test_a_receipt_photo_is_downloaded_at_full_size():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+
+    await handler.handle(a_photo_update())
+
+    assert bot.downloaded == ["full"]
+    assert proposer.attachments[0].mime_type == "image/jpeg"
+    assert proposer.attachments[0].data == b"fake-bytes"
+
+
+async def test_a_photo_caption_is_passed_along_as_text():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+
+    await handler.handle(a_photo_update(caption="dinner with sam"))
+
+    assert proposer.seen == ["dinner with sam"]
+
+
+async def test_a_photo_produces_a_card():
+    handler, bot, _ = make_handler(proposal=a_draft())
+
+    await handler.handle(a_photo_update())
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["reply_markup"] is not None
+
+
+async def test_a_voice_note_is_downloaded_and_sent_as_audio():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+
+    await handler.handle(a_voice_update())
+
+    assert bot.downloaded == ["voice1"]
+    assert proposer.attachments[0].mime_type == "audio/ogg"
+
+
+async def test_a_failed_download_is_reported_not_swallowed():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+    bot.download_error = RuntimeError("file too big")
+
+    await handler.handle(a_photo_update())
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["reply_markup"] is None
+    assert proposer.attachments == []
+
+
+async def test_a_message_with_nothing_readable_never_reaches_the_model():
+    handler, bot, repo, proposer = make_handler_with_proposer(proposal=a_draft())
+
+    await handler.handle({"update_id": 5, "message": {"message_id": 9, "chat": {"id": CHAT}, "sticker": {"file_id": "s1"}}})
+
+    assert proposer.seen == []
+    assert len(bot.sent) == 1

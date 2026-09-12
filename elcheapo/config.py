@@ -1,7 +1,9 @@
 """Environment-derived settings."""
 
+from typing import Annotated
+
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -12,11 +14,14 @@ class Settings(BaseSettings):
     telegram_bot_token: str
     gemini_api_key: str = ""
     telegram_webhook_secret: str = ""
-    allowed_chat_ids: set[int] = Field(default_factory=set)
+    # NoDecode stops pydantic-settings JSON-decoding the raw value, which it
+    # does before validators run -- "111,222" is not JSON, so loading a .env
+    # file with two ids failed outright.
+    allowed_chat_ids: Annotated[set[int], NoDecode] = Field(default_factory=set)
 
     spreadsheet_id: str = ""
     currency: str = "CAD"
-    timezone: str = "Africa/Cairo"
+    timezone: str = "America/Toronto"
 
     google_cloud_project: str = ""
     google_cloud_location: str = "us-central1"

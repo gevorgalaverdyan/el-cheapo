@@ -11,9 +11,10 @@ from elcheapo.channels.telegram.cards import (
     render_discarded,
     render_error,
 )
+from elcheapo.channels.telegram.media import attachment_in
 from elcheapo.channels.telegram.payload import PayloadError
 from elcheapo.commit import commit_expense
-from elcheapo.models import Draft
+from elcheapo.models import Attachment, Draft
 from elcheapo.repositories import Repositories
 from elcheapo.updates import chat_id_of
 
@@ -24,13 +25,14 @@ DISCARD = "dsc"
 
 COULD_NOT_READ = (
     "I couldn't read an expense in that. Try something like "
-    "'lunch 120 at Zooba', or send a photo of the receipt."
+    "'lunch 18.50 at Tim Hortons', or send a photo of the receipt."
 )
 STALE_CARD = "This card is too old to act on. Send the expense again."
 MODEL_UNAVAILABLE = (
     "I couldn't reach the model just now. Send that again in a moment."
 )
 COMMIT_FAILED = "I couldn't save that to the sheet. Tap Accept again to retry."
+DOWNLOAD_FAILED = "I couldn't download that file. Try sending it again."
 
 
 class Bot(Protocol):
@@ -46,9 +48,13 @@ class Bot(Protocol):
         self, callback_query_id: str, text: str = ""
     ) -> None: ...
 
+    async def download(self, file_id: str) -> bytes: ...
+
 
 class Proposer(Protocol):
-    async def propose(self, *, text: str, chat_id: int) -> Draft | None: ...
+    async def propose(
+        self, *, text: str, chat_id: int, attachment: Attachment | None = None
+    ) -> Draft | None: ...
 
 
 class ExpenseHandler:
@@ -75,10 +81,31 @@ class ExpenseHandler:
 
     async def _handle_message(self, message: dict) -> None:
         chat_id = message["chat"]["id"]
-        text = message.get("text", "")
+        # A photo or voice note carries its words in `caption`, not `text`.
+        text = message.get("text") or message.get("caption") or ""
+        reference = attachment_in(message)
+
+        if reference is None and not text.strip():
+            # A sticker, a location, a poll. Nothing to read, so nothing is
+            # spent asking the model about it.
+            await self._bot.send_message(chat_id, COULD_NOT_READ)
+            return
+
+        attachment = None
+        if reference is not None:
+            file_id, mime_type = reference
+            try:
+                data = await self._bot.download(file_id)
+            except Exception:  # noqa: BLE001
+                log.exception("download of %s failed", file_id)
+                await self._bot.send_message(chat_id, DOWNLOAD_FAILED)
+                return
+            attachment = Attachment(data=data, mime_type=mime_type)
 
         try:
-            draft = await self._proposer.propose(text=text, chat_id=chat_id)
+            draft = await self._proposer.propose(
+                text=text, chat_id=chat_id, attachment=attachment
+            )
         except Exception:  # noqa: BLE001 - the user gets an answer either way
             log.exception("proposal failed for chat %s", chat_id)
             await self._bot.send_message(chat_id, MODEL_UNAVAILABLE)

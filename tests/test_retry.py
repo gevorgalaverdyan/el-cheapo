@@ -1,6 +1,11 @@
 import pytest
 
-from elcheapo.retry import is_transient, with_retries
+from elcheapo.retry import (
+    MAX_SUGGESTED_DELAY,
+    is_transient,
+    retry_delay_for,
+    with_retries,
+)
 
 
 class Boom(Exception):
@@ -90,3 +95,47 @@ def test_client_errors_are_permanent(code):
 
 def test_an_unavailable_message_is_transient_even_without_a_code():
     assert is_transient(Exception("503 UNAVAILABLE. high demand")) is True
+
+
+class QuotaError(Exception):
+    code = 429
+
+
+def test_no_delay_is_suggested_by_a_plain_error():
+    assert retry_delay_for(Boom(code=503)) is None
+
+
+def test_a_retry_delay_field_is_honoured():
+    error = QuotaError("429 RESOURCE_EXHAUSTED {'retryDelay': '58s'}")
+
+    assert retry_delay_for(error) == 58.0
+
+
+def test_a_retry_in_sentence_is_honoured():
+    error = QuotaError("You exceeded your quota. Please retry in 45.492815241s.")
+
+    assert retry_delay_for(error) == pytest.approx(45.49, abs=0.01)
+
+
+def test_a_suggested_delay_is_capped():
+    error = QuotaError("Please retry in 9999s.")
+
+    assert retry_delay_for(error) == MAX_SUGGESTED_DELAY
+
+
+async def test_the_servers_suggested_delay_wins_over_backoff():
+    delays = []
+
+    async def record(seconds: float) -> None:
+        delays.append(seconds)
+
+    calls = []
+
+    async def operation():
+        calls.append(1)
+        if len(calls) < 2:
+            raise QuotaError("Please retry in 30s.")
+        return "ok"
+
+    assert await with_retries(operation, base_delay=0.5, sleep=record) == "ok"
+    assert delays == [30.0]

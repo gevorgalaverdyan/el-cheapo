@@ -39,3 +39,34 @@ def test_an_empty_value_allows_nobody():
 def test_a_non_numeric_chat_id_is_rejected_loudly():
     with pytest.raises(ValueError):
         settings_with("me,you")
+
+
+def settings_from_env_file(tmp_path, contents: str) -> Settings:
+    """Load through a real .env file -- the path the bug actually lived on."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(contents, encoding="utf-8")
+    return Settings(_env_file=str(env_file))
+
+
+def test_one_chat_id_loads_from_a_dotenv_file(tmp_path):
+    settings = settings_from_env_file(
+        tmp_path, "TELEGRAM_BOT_TOKEN=token\nALLOWED_CHAT_IDS=111\n"
+    )
+
+    assert settings.allowed_chat_ids == {111}
+
+
+def test_two_chat_ids_load_from_a_dotenv_file(tmp_path):
+    settings = settings_from_env_file(
+        tmp_path, "TELEGRAM_BOT_TOKEN=token\nALLOWED_CHAT_IDS=111,222\n"
+    )
+
+    assert settings.allowed_chat_ids == {111, 222}
+
+
+def test_a_group_chat_id_loads_from_a_dotenv_file(tmp_path):
+    settings = settings_from_env_file(
+        tmp_path, "TELEGRAM_BOT_TOKEN=token\nALLOWED_CHAT_IDS=111,-1001234567890\n"
+    )
+
+    assert settings.allowed_chat_ids == {111, -1001234567890}

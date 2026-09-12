@@ -5,6 +5,7 @@ makes the bot look broken when it isn't.
 """
 
 import asyncio
+import re
 from typing import Awaitable, Callable, TypeVar
 
 T = TypeVar("T")
@@ -16,6 +17,29 @@ TRANSIENT_MARKERS = (
     "DEADLINE_EXCEEDED",
     "INTERNAL",
 )
+
+# Longer than this and waiting is worse than telling the user to try again.
+MAX_SUGGESTED_DELAY = 65.0
+
+_DELAY_PATTERNS = (
+    re.compile(r"retryDelay['\"]?\s*:\s*['\"]?([\d.]+)s"),
+    re.compile(r"retry in ([\d.]+)\s*s", re.IGNORECASE),
+)
+
+
+def retry_delay_for(error: BaseException) -> float | None:
+    """How long the server asked us to wait, if it said.
+
+    Rate limit responses carry a concrete delay. Guessing with exponential
+    backoff when the server has told you the answer just wastes attempts --
+    a 0.5s retry against a 58s quota window always fails.
+    """
+    text = str(error)
+    for pattern in _DELAY_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return min(float(match.group(1)), MAX_SUGGESTED_DELAY)
+    return None
 
 
 def is_transient(error: BaseException) -> bool:
@@ -46,6 +70,9 @@ async def with_retries(
         except Exception as error:
             if attempt == attempts or not is_transient(error):
                 raise
-            await sleep(base_delay * 2 ** (attempt - 1))
+            suggested = retry_delay_for(error)
+            await sleep(
+                suggested if suggested is not None else base_delay * 2 ** (attempt - 1)
+            )
 
     raise AssertionError("unreachable")
