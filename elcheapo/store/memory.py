@@ -29,6 +29,7 @@ class InMemoryRepository:
             for name in (categories if categories is not None else SEED_CATEGORIES)
         ]
         self._expenses: list[Expense] = []
+        self._postal_code: str | None = None
 
     def categories(self) -> list[Category]:
         return list(self._categories)
@@ -52,6 +53,13 @@ class InMemoryRepository:
         # Newest first, with logged_at breaking ties between same-day rows.
         matching.sort(key=lambda e: (e.date, e.logged_at), reverse=True)
         return matching[: query.limit]
+
+    def postal_code(self) -> str | None:
+        return self._postal_code
+
+    def set_postal_code(self, code: str) -> None:
+        self._postal_code = code
+        print(f"[sheet] postal code: {code}")
 
     @property
     def expenses(self) -> list[Expense]:

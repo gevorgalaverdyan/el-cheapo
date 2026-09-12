@@ -7,6 +7,29 @@ from elcheapo.flipp import Flipp
 from elcheapo.models import Document
 from elcheapo.store.repository import ExpenseRepository
 
+DEALS = """When they ask what is on sale, what is cheap this week, where to buy
+something, or whether a price is good, call search_deals. list_weekly_ads shows
+which shops have a flyer out, and list_flyer_items reads one of them.
+
+{location}
+
+Never quote a price the tools did not return. Deals are not expenses -- do not
+call propose_expense for something the user has only been told is on sale.
+
+"""
+
+# The postal code is on file, so the agent starts the turn already knowing it.
+KNOWN_LOCATION = """The user's postal code is {postal_code}. Leave the postal_code
+argument out and do not raise the subject -- it is already known. Pass one only
+if they ask about somewhere else. If they say they have moved, call
+remember_postal_code with the new one."""
+
+# Nobody has told us yet. One question, then it is kept for good.
+UNKNOWN_LOCATION = """You do not know where the user lives, and the deal tools
+need a Canadian postal code. Ask for it once, the first time they want deals --
+something like M5V 2T6 -- then call remember_postal_code so they are never asked
+again. Never guess one. This bot covers Canada only, so a US ZIP is no use."""
+
 INSTRUCTION = """You are ElCheapo, a terse assistant that logs personal spending.
 
 Today is {today}. Amounts are in {currency} unless the user names another currency.
@@ -28,15 +51,7 @@ Say in one line what you sent; the file itself is already on its way. If you nee
 authoritative category list, including which ones the user added themselves,
 call list_categories.
 
-When they ask what is on sale, what is cheap this week, where to buy
-something, or whether a price is good, call search_deals. list_weekly_ads shows
-which shops have a flyer out, and list_flyer_items reads one of them. These need
-a postal code, which you have no way of knowing: ask for it once, then reuse it
-for the rest of the conversation. Never guess one, and never quote a price the
-tools did not return. Deals are not expenses -- do not call propose_expense for
-something the user has only been told is on sale.
-
-Extracting an expense:
+{deals}Extracting an expense:
 - Take the final total paid. Not a subtotal, not a pre-tip amount, not a single
   line item.
 - Read the merchant from the receipt header where there is one.
@@ -62,11 +77,15 @@ def build_agent(
     repository: ExpenseRepository,
     documents: list[Document] | None = None,
     flipp: Flipp | None = None,
+    postal_code: str | None = None,
 ) -> LlmAgent:
     """Build the agent for one user.
 
     Tools are bound to that user's repository, so a tool call cannot reach
     another chat's data even if the model asks for it.
+
+    The postal code is inlined the same way the categories are, so a user
+    who has already given one is never asked for it a second time.
 
     The category names are also inlined into the instruction. That is a
     deliberate duplicate of list_categories: the common case -- logging an
@@ -80,9 +99,27 @@ def build_agent(
             today=today,
             currency=currency,
             categories=", ".join(categories) or "(none yet)",
+            deals=_deals_instruction(flipp, postal_code),
         ),
         description="Logs personal expenses from chat messages, receipts and voice notes.",
         tools=make_tools(
             repository, currency=currency, documents=documents, flipp=flipp
         ),
     )
+
+
+def _deals_instruction(flipp: Flipp | None, postal_code: str | None) -> str:
+    """The part of the prompt about flyers, or nothing at all.
+
+    With no Flipp key the tools do not exist, so describing them would only
+    invite the model to call something that is not there.
+    """
+    if flipp is None:
+        return ""
+
+    location = (
+        KNOWN_LOCATION.format(postal_code=postal_code)
+        if postal_code
+        else UNKNOWN_LOCATION
+    )
+    return DEALS.format(location=location)

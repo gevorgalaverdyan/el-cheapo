@@ -13,6 +13,7 @@ class FakeExpenseRepository:
         self.expenses: list[Expense] = []
         self.calls: list[str] = []
         self.append_failures = 0
+        self._postal_code: str | None = None
 
     def categories(self) -> list[Category]:
         return list(self._categories)
@@ -30,6 +31,13 @@ class FakeExpenseRepository:
 
     def recent_draft_ids(self, limit: int = 200) -> set[str]:
         return {expense.draft_id for expense in self.expenses[-limit:]}
+
+    def postal_code(self) -> str | None:
+        return self._postal_code
+
+    def set_postal_code(self, code: str) -> None:
+        self.calls.append(f"set_postal_code:{code}")
+        self._postal_code = code
 
     def query(self, query: ExpenseQuery) -> list[Expense]:
         matching = [e for e in self.expenses if query.matches(e)]

@@ -30,3 +30,11 @@ class ExpenseRepository(Protocol):
     def query(self, query: ExpenseQuery) -> list[Expense]:
         """Matching expenses, newest first."""
         ...
+
+    def postal_code(self) -> str | None:
+        """The user's postal code, or None if they have not given one."""
+        ...
+
+    def set_postal_code(self, code: str) -> None:
+        """Remember this postal code, replacing any earlier one."""
+        ...

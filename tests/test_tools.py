@@ -296,12 +296,16 @@ A_SPARSE_DEAL = {
 }
 
 
-def deal_tools(flipp):
+def deal_tools(flipp, repository=None):
+    repository = repository or InMemoryRepository(categories=["Groceries"])
+    return {tool.__name__: tool for tool in make_tools(repository, flipp=flipp)}
+
+
+def remembering(postal_code: str = "") -> InMemoryRepository:
     repository = InMemoryRepository(categories=["Groceries"])
-    return {
-        tool.__name__: tool
-        for tool in make_tools(repository, flipp=flipp)
-    }
+    if postal_code:
+        repository.set_postal_code(postal_code)
+    return repository
 
 
 def test_the_deal_tools_are_absent_without_a_flipp_client():
@@ -544,3 +548,75 @@ async def test_a_deal_with_every_optional_field_null_still_reads_cleanly():
     assert deal["was"] == ""
     assert deal["deal"] == ""
     assert deal["name"] == "Store Brand Milk"
+
+
+# --- remembering where the user shops ----------------------------------
+
+
+async def test_a_postal_code_the_user_gives_is_remembered():
+    repository = remembering()
+    by_name = deal_tools(FakeFlipp(), repository)
+
+    await by_name["remember_postal_code"]("m5v2t6")
+
+    assert repository.postal_code() == "M5V 2T6"
+
+
+async def test_remembering_a_postal_code_confirms_what_was_stored():
+    by_name = deal_tools(FakeFlipp(), remembering())
+
+    result = await by_name["remember_postal_code"]("m5v2t6")
+
+    assert result["postal_code"] == "M5V 2T6"
+
+
+async def test_a_zip_is_refused_because_the_bot_is_canada_only():
+    """Flipp answers a ZIP with US flyers -- plausible deals at unreachable shops."""
+    repository = remembering()
+    by_name = deal_tools(FakeFlipp(), repository)
+
+    result = await by_name["remember_postal_code"]("95054")
+
+    assert "error" in result
+    assert repository.postal_code() is None
+
+
+async def test_searching_deals_uses_the_remembered_postal_code():
+    """The whole point: the user says where they live once."""
+    flipp = FakeFlipp()
+    by_name = deal_tools(flipp, remembering("M5V 2T6"))
+
+    await by_name["search_deals"]("chicken")
+
+    assert flipp.calls == [("search_deals", "chicken", "M5V 2T6")]
+
+
+async def test_a_postal_code_given_in_the_moment_beats_the_remembered_one():
+    """Asking about deals while away should not move where they live."""
+    flipp = FakeFlipp()
+    repository = remembering("M5V 2T6")
+    by_name = deal_tools(flipp, repository)
+
+    await by_name["search_deals"]("chicken", "H2Y 1C6")
+
+    assert flipp.calls == [("search_deals", "chicken", "H2Y 1C6")]
+    assert repository.postal_code() == "M5V 2T6"
+
+
+async def test_a_malformed_postal_code_is_refused_before_a_credit_is_spent():
+    flipp = FakeFlipp()
+    by_name = deal_tools(flipp, remembering())
+
+    result = await by_name["search_deals"]("chicken", "95054")
+
+    assert "error" in result
+    assert flipp.calls == []
+
+
+async def test_weekly_ads_also_use_the_remembered_postal_code():
+    flipp = FakeFlipp()
+    by_name = deal_tools(flipp, remembering("M5V 2T6"))
+
+    await by_name["list_weekly_ads"]()
+
+    assert flipp.calls == [("weekly_ads", "M5V 2T6", "")]

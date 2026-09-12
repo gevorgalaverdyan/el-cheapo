@@ -10,14 +10,16 @@ from tests.fakes import FakeFlipp
 class OneRepository:
     """The Repositories protocol, for a bot with a single chat."""
 
-    def __init__(self):
+    def __init__(self, postal_code: str = ""):
         self._repository = InMemoryRepository(categories=["Groceries"])
+        if postal_code:
+            self._repository.set_postal_code(postal_code)
 
     def for_chat(self, chat_id: int):
         return self._repository
 
 
-def an_agent(flipp=None):
+def an_agent(flipp=None, postal_code=None):
     return build_agent(
         model="gemini-3.5-flash-lite",
         today="2026-09-12",
@@ -25,6 +27,7 @@ def an_agent(flipp=None):
         categories=["Groceries"],
         repository=InMemoryRepository(categories=["Groceries"]),
         flipp=flipp,
+        postal_code=postal_code,
     )
 
 
@@ -85,3 +88,55 @@ async def test_the_proposer_hands_its_flipp_client_to_the_agent(monkeypatch):
         await subject.propose(text="what is on sale", chat_id=1)
 
     assert seen["flipp"] is flipp
+
+
+def test_a_known_postal_code_is_put_in_the_instruction_rather_than_asked_for():
+    """The whole point of storing it: the agent starts every turn knowing it."""
+    instruction = an_agent(flipp=FakeFlipp(), postal_code="M5V 2T6").instruction
+
+    assert "M5V 2T6" in instruction
+
+
+def test_an_agent_that_does_not_know_the_postal_code_is_told_how_to_keep_it():
+    instruction = an_agent(flipp=FakeFlipp()).instruction
+
+    assert "remember_postal_code" in instruction
+
+
+def test_an_agent_that_knows_the_postal_code_is_not_told_to_ask_for_one():
+    """Asking again for something already on file is the bug being fixed."""
+    known = an_agent(flipp=FakeFlipp(), postal_code="M5V 2T6").instruction
+    unknown = an_agent(flipp=FakeFlipp()).instruction
+
+    assert "ask for it once" in unknown.casefold()
+    assert "ask for it once" not in known.casefold()
+
+
+async def test_the_proposer_gives_the_agent_the_stored_postal_code(monkeypatch):
+    from datetime import timedelta
+
+    from elcheapo.agent import proposer as proposer_module
+    from elcheapo.agent.proposer import AgentProposer
+
+    seen = {}
+
+    def record(**kwargs):
+        seen.update(kwargs)
+        raise Recorded
+
+    monkeypatch.setattr(proposer_module, "build_agent", record)
+
+    subject = AgentProposer(
+        api_key="",
+        model="gemini-3.5-flash-lite",
+        repositories=OneRepository(postal_code="M5V 2T6"),
+        currency="CAD",
+        timezone="America/Toronto",
+        idle_timeout=timedelta(minutes=15),
+        flipp=FakeFlipp(),
+    )
+
+    with pytest.raises(Recorded):
+        await subject.propose(text="what is on sale", chat_id=1)
+
+    assert seen["postal_code"] == "M5V 2T6"

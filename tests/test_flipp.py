@@ -39,7 +39,7 @@ async def test_every_call_carries_the_api_key_header():
     handle, seen = recording({"items": [], "total": 0})
     flipp = flipp_answering(handle)
 
-    await flipp.search_deals("milk", "95054")
+    await flipp.search_deals("milk", "K1A 0B1")
 
     assert seen["request"].headers["X-API-Key"] == KEY
 
@@ -50,7 +50,7 @@ async def test_the_success_envelope_is_unwrapped():
     handle, _ = recording({"items": [{"name": "Whole Chicken"}], "total": 1})
     flipp = flipp_answering(handle)
 
-    body = await flipp.search_deals("chicken", "95054")
+    body = await flipp.search_deals("chicken", "K1A 0B1")
 
     assert body["items"] == [{"name": "Whole Chicken"}]
     assert body["total"] == 1
@@ -76,7 +76,7 @@ async def test_weekly_ads_leaves_out_a_merchant_filter_that_was_not_given():
     handle, seen = recording({"flyers": [], "total": 0})
     flipp = flipp_answering(handle)
 
-    await flipp.weekly_ads("95054")
+    await flipp.weekly_ads("K1A 0B1")
 
     assert seen["request"].url.path.endswith("/get_weekly_ads")
     assert "merchant_name" not in seen["request"].url.params
@@ -86,7 +86,7 @@ async def test_weekly_ads_passes_a_merchant_filter_when_given():
     handle, seen = recording({"flyers": [], "total": 0})
     flipp = flipp_answering(handle)
 
-    await flipp.weekly_ads("95054", merchant_name="loblaws")
+    await flipp.weekly_ads("K1A 0B1", merchant_name="loblaws")
 
     assert seen["request"].url.params["merchant_name"] == "loblaws"
 
@@ -110,7 +110,7 @@ async def test_a_failing_call_never_names_the_api_key():
     flipp = flipp_answering(unauthorized)
 
     with pytest.raises(FlippError) as caught:
-        await flipp.search_deals("chicken", "95054")
+        await flipp.search_deals("chicken", "K1A 0B1")
 
     assert KEY not in str(caught.value)
 
@@ -124,7 +124,7 @@ async def test_being_rate_limited_says_so_in_plain_words():
     flipp = flipp_answering(too_many)
 
     with pytest.raises(FlippError) as caught:
-        await flipp.search_deals("chicken", "95054")
+        await flipp.search_deals("chicken", "K1A 0B1")
 
     assert "rate limit" in str(caught.value).casefold()
 
@@ -136,4 +136,4 @@ async def test_a_missing_key_fails_before_any_request_is_made():
     flipp = Flipp("", client=httpx.AsyncClient(transport=httpx.MockTransport(explode)))
 
     with pytest.raises(FlippError):
-        await flipp.search_deals("chicken", "95054")
+        await flipp.search_deals("chicken", "K1A 0B1")

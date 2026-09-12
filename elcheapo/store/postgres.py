@@ -136,6 +136,13 @@ class PostgresRepository:
         )
         return [_to_expense(row) for row in rows]
 
+    def postal_code(self) -> str | None:
+        rows = self._fetch(
+            "SELECT postal_code FROM user_settings WHERE uid = :uid",
+            {"uid": self._uid},
+        )
+        return rows[0].postal_code if rows else None
+
     # --- writes ---------------------------------------------------------
 
     def add_category(self, name: str) -> None:
@@ -146,6 +153,20 @@ class PostgresRepository:
             ON CONFLICT DO NOTHING
             """,
             {"uid": self._uid, "name": name},
+        )
+
+    def set_postal_code(self, code: str) -> None:
+        # One row per user, so a second answer overwrites the first rather
+        # than leaving two codes with no way to tell which is current.
+        self._execute(
+            """
+            INSERT INTO user_settings (uid, postal_code)
+            VALUES (:uid, :postal_code)
+            ON CONFLICT (uid) DO UPDATE
+                SET postal_code = EXCLUDED.postal_code,
+                    updated_at = now()
+            """,
+            {"uid": self._uid, "postal_code": code},
         )
 
     def append_expense(self, expense: Expense) -> None:

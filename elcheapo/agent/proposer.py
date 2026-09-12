@@ -72,6 +72,9 @@ class AgentProposer:
 
         repository = self._repositories.for_chat(chat_id)
         categories = [category.name for category in repository.categories()]
+        # Read next to the categories, and inlined the same way: the agent
+        # begins every turn already knowing where the user shops.
+        postal_code = repository.postal_code()
         today = datetime.now(self._zone).date()
 
         # Files the agent generates this turn land here.
@@ -86,6 +89,7 @@ class AgentProposer:
                 repository=repository,
                 documents=documents,
                 flipp=self._flipp,
+                postal_code=postal_code,
             ),
             app_name=APP_NAME,
             session_service=self._sessions,

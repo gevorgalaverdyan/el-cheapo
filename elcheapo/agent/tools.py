@@ -15,6 +15,7 @@ from typing import Callable
 
 from elcheapo.flipp import Flipp, FlippError
 from elcheapo.models import Document, Expense, ExpenseQuery
+from elcheapo.postal import normalise
 from elcheapo.reports import GROUPINGS, build_csv, build_xlsx
 from elcheapo.store.repository import ExpenseRepository
 
@@ -25,6 +26,7 @@ EXPORT_EXPENSES = "export_expenses"
 SEARCH_DEALS = "search_deals"
 LIST_WEEKLY_ADS = "list_weekly_ads"
 LIST_FLYER_ITEMS = "list_flyer_items"
+REMEMBER_POSTAL_CODE = "remember_postal_code"
 
 # Longer than this and a price qualifier is marketing copy, not a unit.
 MAX_PRICE_NOTE = 12
@@ -253,7 +255,60 @@ def make_tools(
             "total": f"{total:.2f}",
         }
 
-    async def search_deals(query: str, postal_code: str, limit: int = 10) -> dict:
+    def where_to_search(given: str) -> str:
+        """The postal code to search with.
+
+        What the model passed if it passed anything -- the user may be
+        asking about somewhere they are visiting -- otherwise the one the
+        user gave once and we kept. Raises when there is neither, so the
+        agent knows to ask rather than spending a credit on a guess.
+        """
+        if given.strip():
+            code = normalise(given)
+            if code is None:
+                raise ValueError(
+                    f"{given!r} is not a Canadian postal code. Ask the user "
+                    "for one, like M5V 2T6."
+                )
+            return code
+
+        stored = repository.postal_code()
+        if not stored:
+            raise ValueError(
+                "No postal code on file. Ask the user for their Canadian "
+                "postal code, then call remember_postal_code."
+            )
+        return stored
+
+    async def remember_postal_code(postal_code: str) -> dict:
+        """Remember the user's postal code so they are never asked again.
+
+        Call this the first time the user tells you their postal code, and
+        again if they say they have moved. Once it is stored, the deal tools
+        use it on their own and you should stop asking.
+
+        Args:
+            postal_code: A Canadian postal code, like "M5V 2T6". This bot
+                is Canada-only; a US ZIP is not accepted.
+
+        Returns:
+            The postal code as stored, or an `error` if it was not one.
+        """
+        code = normalise(postal_code)
+        if code is None:
+            return {
+                "error": (
+                    f"{postal_code!r} is not a Canadian postal code. This bot "
+                    "only covers Canada -- ask for one like M5V 2T6."
+                )
+            }
+
+        repository.set_postal_code(code)
+        return {"status": "remembered", "postal_code": code}
+
+    async def search_deals(
+        query: str, postal_code: str = "", limit: int = 10
+    ) -> dict:
         """Search this week's store flyers for something on sale near the user.
 
         Use this when the user asks what is on sale, what is cheap this week,
@@ -263,8 +318,10 @@ def make_tools(
         Args:
             query: What to look for, one or two words. For example "chicken",
                 "olive oil", "diapers".
-            postal_code: The user's Canadian postal code like "M5V 2T6", or a
-                US ZIP like "95054". Ask the user for it. Never invent one.
+            postal_code: Leave this out. The user's own postal code is used
+                automatically once they have given it. Pass one only when
+                they ask about somewhere else, as a Canadian postal code
+                like "M5V 2T6". Never invent one.
             limit: Most deals to return. Defaults to 10.
 
         Returns:
@@ -272,13 +329,15 @@ def make_tools(
             the day the offer ends, and a flyer_id for list_flyer_items. On
             failure, an `error` to pass on to the user.
         """
-        if not postal_code.strip():
-            # Refused here rather than sent: the call costs a credit and the
-            # API would only reject it.
-            return {"error": "postal_code is required. Ask the user where they shop."}
+        try:
+            # Resolved before the call: a bad or missing code would only
+            # spend a credit to be rejected.
+            where = where_to_search(postal_code)
+        except ValueError as error:
+            return {"error": str(error)}
 
         try:
-            body = await flipp.search_deals(query, postal_code.strip())
+            body = await flipp.search_deals(query, where)
         except FlippError as error:
             # Returned rather than raised, like the other tools, so the agent
             # can tell the user what went wrong instead of ending its turn.
@@ -287,12 +346,12 @@ def make_tools(
         items = body.get("items") or []
         return {
             "total_matching": body.get("total", len(items)),
-            "postal_code": body.get("postal_code", postal_code.strip()),
+            "postal_code": body.get("postal_code", where),
             "deals": [_as_deal(item) for item in items[:limit]],
         }
 
     async def list_weekly_ads(
-        postal_code: str, merchant_name: str = "", limit: int = 20
+        postal_code: str = "", merchant_name: str = "", limit: int = 20
     ) -> dict:
         """List the store flyers running near the user this week.
 
@@ -301,8 +360,9 @@ def make_tools(
         back with a flyer_id you can pass to list_flyer_items.
 
         Args:
-            postal_code: The user's postal code or ZIP. Ask for it; never
-                invent one.
+            postal_code: Leave this out. The user's own postal code is used
+                automatically once they have given it. Pass a Canadian
+                postal code only when they ask about somewhere else.
             merchant_name: Part of a retailer name to narrow the list, such as
                 "loblaws". Empty string for every flyer, which is well over a
                 hundred in a city -- filter unless the user really wants all
@@ -314,11 +374,13 @@ def make_tools(
             flyer_id for list_flyer_items. On failure, an `error` to pass on
             to the user.
         """
-        if not postal_code.strip():
-            return {"error": "postal_code is required. Ask the user where they shop."}
+        try:
+            where = where_to_search(postal_code)
+        except ValueError as error:
+            return {"error": str(error)}
 
         try:
-            body = await flipp.weekly_ads(postal_code.strip(), merchant_name)
+            body = await flipp.weekly_ads(where, merchant_name)
         except FlippError as error:
             return {"error": str(error)}
 
@@ -359,7 +421,12 @@ def make_tools(
 
     tools = [propose_expense, list_categories, query_expenses, export_expenses]
     if flipp is not None:
-        tools += [search_deals, list_weekly_ads, list_flyer_items]
+        tools += [
+            search_deals,
+            list_weekly_ads,
+            list_flyer_items,
+            remember_postal_code,
+        ]
     return tools
 
 

@@ -64,6 +64,16 @@ STATEMENTS = [
     CREATE INDEX IF NOT EXISTS expenses_uid_category_idx
         ON expenses (uid, lower(category))
     """,
+    # One row per user, holding what they have told us about themselves.
+    # uid is the chat id as text, as it is in the two tables above.
+    # postal_code is nullable: a user who has never been asked has none.
+    """
+    CREATE TABLE IF NOT EXISTS user_settings (
+        uid         TEXT PRIMARY KEY,
+        postal_code TEXT,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
 ]
 
 SEED_CATEGORY = text(
