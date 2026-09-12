@@ -1,5 +1,7 @@
 # ElCheapo
 
+[![Watch the Demo]([https://youtube.com](https://www.youtube.com/watch?v=E36ATyPZ8f4))]([https://youtu.be](https://www.youtube.com/watch?v=E36ATyPZ8f4))
+
 A Telegram bot that tracks personal spending through conversation. Send it a
 photo of a receipt, a voice note, or a sentence like "45 on dinner last night",
 and it proposes an expense as a card. Nothing is stored until you tap Accept.
