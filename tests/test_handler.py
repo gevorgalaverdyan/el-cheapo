@@ -409,3 +409,21 @@ async def test_a_file_and_a_card_can_arrive_together():
     assert len(bot.documents) == 1
     assert len(bot.sent) == 1
     assert bot.sent[0]["reply_markup"] is not None
+
+
+async def test_markdown_in_an_answer_is_rendered_before_it_is_sent():
+    """Messages go out as HTML, so the model's asterisks would show literally."""
+    handler, bot, _ = make_handler(reply="**IGA**: eggs for $3.49")
+
+    await handler.handle(a_text_update("egg deals?"))
+
+    assert bot.sent[0]["text"] == "<b>IGA</b>: eggs for $3.49"
+
+
+async def test_an_answer_naming_a_merchant_with_an_ampersand_is_escaped():
+    """Unescaped, Telegram rejects the message and the user gets nothing."""
+    handler, bot, _ = make_handler(reply="M&M Food Market has chicken")
+
+    await handler.handle(a_text_update("chicken deals?"))
+
+    assert bot.sent[0]["text"] == "M&amp;M Food Market has chicken"

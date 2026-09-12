@@ -11,6 +11,7 @@ from elcheapo.channels.telegram.cards import (
     render_discarded,
     render_error,
 )
+from elcheapo.channels.telegram.markdown import to_html
 from elcheapo.channels.telegram.media import attachment_in
 from elcheapo.channels.telegram.payload import PayloadError
 from elcheapo.commit import commit_expense
@@ -152,8 +153,11 @@ class ExpenseHandler:
             return
 
         # No expense, but the agent may have answered a question -- a query
-        # tool's result arrives here as prose.
-        await self._bot.send_message(chat_id, reply.text or COULD_NOT_READ)
+        # tool's result arrives here as prose. It is the model's Markdown, and
+        # it goes out as HTML, so it is converted and escaped on the way.
+        await self._bot.send_message(
+            chat_id, to_html(reply.text) or COULD_NOT_READ
+        )
 
     async def _handle_callback(self, callback: dict) -> None:
         # Acknowledged first so the client spinner clears even if the work below
