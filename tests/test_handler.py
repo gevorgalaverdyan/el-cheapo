@@ -26,13 +26,13 @@ def a_draft(**overrides) -> Draft:
     return Draft(**fields)
 
 
-def make_handler(proposal: Draft | None = None, categories=("Groceries",)):
+def make_handler(proposal: Draft | None = None, categories=("Groceries",), error=None):
     repo = FakeSheetsRepository(categories=list(categories))
     bot = FakeTelegramBot()
     handler = ExpenseHandler(
         bot=bot,
         repositories=SingleUserRepositories(repo),
-        proposer=StubProposer(proposal),
+        proposer=StubProposer(proposal, error=error),
         currency="EGP",
         clock=lambda: NOW,
     )
@@ -168,3 +168,24 @@ async def test_a_card_with_an_unreadable_payload_reports_an_error():
     assert repo.expenses == []
     assert bot.answered == ["cb1"]
     assert len(bot.edited) == 1
+
+
+async def test_a_model_outage_gets_an_apology_not_silence():
+    handler, bot, repo = make_handler(error=RuntimeError("503 UNAVAILABLE"))
+
+    await handler.handle(a_text_update())
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["reply_markup"] is None
+    assert repo.expenses == []
+
+
+async def test_a_failed_commit_tells_the_user_to_try_again():
+    handler, bot, repo = make_handler()
+    repo.append_failures = 1
+
+    await handler.handle(a_callback_update("acc", a_draft()))
+
+    assert repo.expenses == []
+    # The card keeps its buttons so Accept can simply be tapped again.
+    assert bot.sent and "again" in bot.sent[-1]["text"].lower()

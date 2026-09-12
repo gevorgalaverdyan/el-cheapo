@@ -69,10 +69,13 @@ class FakeTelegramBot:
 class StubProposer:
     """Returns a fixed draft, so handler tests never touch a model."""
 
-    def __init__(self, draft=None):
+    def __init__(self, draft=None, error: Exception | None = None):
         self._draft = draft
+        self._error = error
         self.seen: list[str] = []
 
     async def propose(self, *, text: str, chat_id: int):
         self.seen.append(text)
+        if self._error is not None:
+            raise self._error
         return self._draft

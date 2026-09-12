@@ -15,6 +15,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from elcheapo.models import Draft
+from elcheapo.retry import with_retries
 
 INSTRUCTION = """You read short messages about personal spending and extract one expense.
 
@@ -65,19 +66,27 @@ class GeminiProposer:
         categories = self._categories_for(chat_id)
         today = datetime.now(self._zone).date()
 
-        response = await self._client.aio.models.generate_content(
-            model=self._model,
-            contents=text,
-            config=types.GenerateContentConfig(
-                system_instruction=INSTRUCTION.format(
-                    today=today.isoformat(),
-                    currency=self._currency,
-                    categories=", ".join(categories) or "(none yet)",
+        async def call():
+            return await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=text,
+                config=types.GenerateContentConfig(
+                    system_instruction=INSTRUCTION.format(
+                        today=today.isoformat(),
+                        currency=self._currency,
+                        categories=", ".join(categories) or "(none yet)",
+                    ),
+                    response_mime_type="application/json",
+                    response_schema=ProposedExpense,
+                    # We ask for a structured reply, never tool calls. Saying so
+                    # explicitly silences the SDK's automatic-function-calling notice.
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        disable=True
+                    ),
                 ),
-                response_mime_type="application/json",
-                response_schema=ProposedExpense,
-            ),
-        )
+            )
+
+        response = await with_retries(call)
 
         return self._to_draft(response.parsed, categories, today)
 

@@ -1,5 +1,6 @@
 """Turns Telegram updates into cards, and accepted cards into expenses."""
 
+import logging
 from datetime import datetime, timezone
 from typing import Callable, Protocol
 
@@ -16,6 +17,8 @@ from elcheapo.models import Draft
 from elcheapo.repositories import Repositories
 from elcheapo.updates import chat_id_of
 
+log = logging.getLogger(__name__)
+
 ACCEPT = "acc"
 DISCARD = "dsc"
 
@@ -24,6 +27,10 @@ COULD_NOT_READ = (
     "'lunch 120 at Zooba', or send a photo of the receipt."
 )
 STALE_CARD = "This card is too old to act on. Send the expense again."
+MODEL_UNAVAILABLE = (
+    "I couldn't reach the model just now. Send that again in a moment."
+)
+COMMIT_FAILED = "I couldn't save that to the sheet. Tap Accept again to retry."
 
 
 class Bot(Protocol):
@@ -70,7 +77,13 @@ class ExpenseHandler:
         chat_id = message["chat"]["id"]
         text = message.get("text", "")
 
-        draft = await self._proposer.propose(text=text, chat_id=chat_id)
+        try:
+            draft = await self._proposer.propose(text=text, chat_id=chat_id)
+        except Exception:  # noqa: BLE001 - the user gets an answer either way
+            log.exception("proposal failed for chat %s", chat_id)
+            await self._bot.send_message(chat_id, MODEL_UNAVAILABLE)
+            return
+
         if draft is None:
             await self._bot.send_message(chat_id, COULD_NOT_READ)
             return
@@ -99,7 +112,14 @@ class ExpenseHandler:
             card = render_discarded(draft, currency=self._currency)
         elif action == ACCEPT:
             repo = self._repositories.for_chat(chat_id)
-            commit_expense(draft, repo, now=self._clock())
+            try:
+                commit_expense(draft, repo, now=self._clock())
+            except Exception:  # noqa: BLE001
+                # The card keeps its buttons, so Accept can simply be tapped
+                # again -- the draft_id guard makes that retry safe.
+                log.exception("commit failed for draft %s", draft.draft_id)
+                await self._bot.send_message(chat_id, COMMIT_FAILED)
+                return
             card = render_confirmed(draft, currency=self._currency)
         else:
             card = render_error(STALE_CARD)
