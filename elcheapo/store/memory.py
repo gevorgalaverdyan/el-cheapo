@@ -1,8 +1,12 @@
-"""An in-memory workbook, so the bot runs before any Google setup exists.
+"""An in-memory store, so the bot runs with no database at all.
 
-Rows are printed as they land and lost on restart. It satisfies the same
-interface the real Sheets repository will, which is the point: the handler
-cannot tell the difference.
+Postgres is the real storage -- see `store/postgres.py`, which is what the
+bot uses when it runs for real. This exists so the test suite and the
+receipt harness can exercise everything above the storage seam without a
+container, and so a first run needs nothing set up. It implements the same
+protocol, which is the point: the handler cannot tell the difference.
+
+Everything written here is printed as it lands and lost on restart.
 """
 
 from datetime import datetime, timezone
@@ -40,12 +44,12 @@ class InMemoryRepository:
 
     def add_category(self, name: str) -> None:
         self._categories.append(Category(name=name, scope="user"))
-        print(f"[sheet] new category: {name}")
+        print(f"[memory] new category: {name}")
 
     def append_expense(self, expense: Expense) -> None:
         self._expenses.append(expense)
         print(
-            f"[sheet] {expense.date} {expense.amount:>9} "
+            f"[memory] {expense.date} {expense.amount:>9} "
             f"{expense.category:<15} {expense.merchant}"
         )
 
@@ -63,7 +67,7 @@ class InMemoryRepository:
 
     def set_postal_code(self, code: str) -> None:
         self._postal_code = code
-        print(f"[sheet] postal code: {code}")
+        print(f"[memory] postal code: {code}")
 
     def tasks(self, include_complete: bool = False) -> list[Task]:
         return [
@@ -81,7 +85,7 @@ class InMemoryRepository:
             updated_at=now,
         )
         self._tasks.append(created)
-        print(f"[sheet] new task: {task}")
+        print(f"[memory] new task: {task}")
         return created
 
     def update_task(

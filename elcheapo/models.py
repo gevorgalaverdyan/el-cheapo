@@ -13,7 +13,7 @@ Source = Literal["text", "image", "voice"]
 
 
 def source_for(mime_type: str | None) -> Source:
-    """Which kind of input an attachment counts as, for the sheet's audit column."""
+    """Which kind of input an attachment counts as, for the audit column."""
     if not mime_type:
         return "text"
     if mime_type.startswith("audio/"):
@@ -26,8 +26,8 @@ def source_for(mime_type: str | None) -> Source:
 class Draft(BaseModel):
     """A proposed expense awaiting human confirmation.
 
-    A draft has never touched the spreadsheet. Only `commit_expense`, reachable
-    solely from an Accept callback, turns one into a row.
+    A draft has never been stored. Only `commit_expense`, reachable solely
+    from an Accept callback, turns one into an expense.
     """
 
     draft_id: str

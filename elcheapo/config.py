@@ -25,8 +25,6 @@ class Settings(BaseSettings):
     currency: str = "CAD"
     timezone: str = "America/Toronto"
 
-    google_cloud_project: str = ""
-    google_cloud_location: str = "us-central1"
     gemini_model: str = "gemini-3.5-flash-lite"
     # Minutes of silence after which a chat starts a fresh conversation.
     session_idle_minutes: int = 15

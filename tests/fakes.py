@@ -4,7 +4,7 @@ from elcheapo.models import AgentReply, Category, Expense, ExpenseQuery
 
 
 class FakeExpenseRepository:
-    """In-memory stand-in for the workbook, recording the order of writes."""
+    """Stand-in for the store, recording the order of writes."""
 
     def __init__(self, categories: list[str] | None = None):
         self._categories = [

@@ -1,7 +1,7 @@
 [project]
 name = "elcheapo"
 version = "0.1.0"
-description = "Conversational expense tracker driven through chat, backed by Google Sheets"
+description = "Conversational expense tracker driven through chat, backed by Postgres"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -11,8 +11,12 @@ dependencies = [
     "pydantic-settings>=2.6",
     "google-adk>=1.0",
     "google-genai>=1.0",
-    "google-api-python-client>=2.150",
-    "google-auth>=2.35",
+    # Storage. pg8000 drives the app's own queries; ADK's session store
+    # needs an async driver against the same database, hence asyncpg.
+    "sqlalchemy>=2.0",
+    "pg8000>=1.31",
+    "asyncpg>=0.30",
+    "openpyxl>=3.1",  # xlsx exports
     "tzdata>=2024.2",  # Windows ships no IANA tz database
 ]
 

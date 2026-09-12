@@ -1,6 +1,7 @@
-"""The seam between the application and the workbook.
+"""The seam between the application and its storage.
 
-Everything above this interface is testable without credentials or network.
+Everything above this interface is testable without a database: the tests
+run against InMemoryRepository, which implements the same protocol.
 """
 
 from typing import Protocol
@@ -9,7 +10,8 @@ from elcheapo.models import Category, Expense, ExpenseQuery, Task
 
 
 class ExpenseRepository(Protocol):
-    """Reads and writes for the expense workbook."""
+    """Everything one user's data supports: expenses, categories,
+    their postal code, and their todo list."""
 
     def categories(self) -> list[Category]:
         """All categories, in sheet order."""
@@ -20,11 +22,11 @@ class ExpenseRepository(Protocol):
         ...
 
     def append_expense(self, expense: Expense) -> None:
-        """Append a confirmed expense row."""
+        """Store a confirmed expense."""
         ...
 
     def recent_draft_ids(self, limit: int = 200) -> set[str]:
-        """Draft ids from the most recent rows, for idempotency checks."""
+        """Draft ids from the most recent expenses, for idempotency checks."""
         ...
 
     def query(self, query: ExpenseQuery) -> list[Expense]:

@@ -1,9 +1,8 @@
-"""Resolving which workbook a given chat writes to.
+"""Resolving which user's data a given chat reads and writes.
 
-Today every chat resolves to the one workbook configured in the environment.
-When accounts arrive, `for_chat` looks up that user's stored credentials and
-spreadsheet id instead -- and nothing above this seam has to change, because
-no caller has ever seen a spreadsheet id.
+The Telegram chat id is the account id, and `for_chat` is the only place
+that knows it. Nothing above this seam has ever seen one, so real accounts
+can arrive here later without disturbing any caller.
 """
 
 from typing import Protocol
@@ -13,12 +12,13 @@ from elcheapo.store.repository import ExpenseRepository
 
 class Repositories(Protocol):
     def for_chat(self, chat_id: int) -> ExpenseRepository:
-        """The workbook belonging to this chat."""
+        """The data belonging to this chat."""
         ...
 
 
 class SingleUserRepositories:
-    """One workbook, owned by the operator. The hackathon configuration."""
+    """One store, shared by every chat. Used by the tests and the receipt
+    harness; the running bot uses PostgresRepositories."""
 
     def __init__(self, repository: ExpenseRepository):
         self._repository = repository

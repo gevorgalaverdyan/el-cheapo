@@ -1,7 +1,7 @@
-"""The only path that writes an expense to the workbook.
+"""The only path that writes an expense to storage.
 
 The agent cannot reach this module. It runs solely from an Accept callback,
-which means every row in the spreadsheet was confirmed by a human.
+which means every stored expense was confirmed by a human.
 """
 
 from dataclasses import dataclass
@@ -20,7 +20,7 @@ class CommitResult:
 def commit_expense(draft: Draft, repo: ExpenseRepository, *, now: datetime) -> CommitResult:
     """Append `draft` as an expense, creating its category first if needed.
 
-    Safe to retry: a draft already present in the sheet is a no-op, so a
+    Safe to retry: a draft already stored is a no-op, so a
     double-tapped Accept or a replayed Telegram webhook cannot duplicate a row.
     """
     if draft.draft_id in repo.recent_draft_ids():
@@ -46,7 +46,7 @@ def commit_expense(draft: Draft, repo: ExpenseRepository, *, now: datetime) -> C
 def _resolve_category(name: str, repo: ExpenseRepository) -> str:
     """Return the canonical category name, creating it if it does not exist.
 
-    Creation happens before the expense is appended so the sheet's validation
+    Creation happens before the expense is stored so the category's
     range always already contains the value being written.
     """
     wanted = name.strip()

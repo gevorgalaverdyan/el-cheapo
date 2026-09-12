@@ -32,7 +32,7 @@ STALE_CARD = "This card is too old to act on. Send the expense again."
 MODEL_UNAVAILABLE = (
     "I couldn't reach the model just now. Send that again in a moment."
 )
-COMMIT_FAILED = "I couldn't save that to the sheet. Tap Accept again to retry."
+COMMIT_FAILED = "I couldn't save that. Tap Accept again to retry."
 DOWNLOAD_FAILED = "I couldn't download that file. Try sending it again."
 RESET_DONE = (
     "Fresh start. I've forgotten what we were talking about -- "
