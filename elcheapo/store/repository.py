@@ -4,6 +4,7 @@ Everything above this interface is testable without a database: the tests
 run against InMemoryRepository, which implements the same protocol.
 """
 
+from decimal import Decimal
 from typing import Protocol
 
 from elcheapo.models import Category, Expense, ExpenseQuery, Task
@@ -19,6 +20,14 @@ class ExpenseRepository(Protocol):
 
     def add_category(self, name: str) -> None:
         """Append a new category. Called before any expense that uses it."""
+        ...
+
+    def set_budget(self, category: str, monthly_budget: Decimal | None) -> None:
+        """Set this user's monthly budget for a category, or clear it with None.
+
+        Budgets belong to the user, not the category: the platform categories
+        are shared rows, so a budget cannot be stored on one.
+        """
         ...
 
     def append_expense(self, expense: Expense) -> None:

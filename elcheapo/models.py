@@ -40,6 +40,30 @@ class Draft(BaseModel):
     source: Source
 
 
+class BudgetStatus(BaseModel):
+    """Where one category stands against its budget, this month."""
+
+    category: str
+    monthly_budget: Decimal
+    spent: Decimal
+
+    @property
+    def remaining(self) -> Decimal:
+        """What is left. Negative once the budget is passed."""
+        return self.monthly_budget - self.spent
+
+    @property
+    def percent(self) -> int:
+        """How much of the budget is used, rounded to whole percent."""
+        if self.monthly_budget <= 0:
+            return 0
+        return int(self.spent / self.monthly_budget * 100)
+
+    @property
+    def is_over(self) -> bool:
+        return self.spent > self.monthly_budget
+
+
 class Task(BaseModel):
     """One item on a user's todo list.
 

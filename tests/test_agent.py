@@ -155,3 +155,10 @@ def test_the_instruction_keeps_tasks_and_expenses_apart():
     instruction = an_agent().instruction.casefold()
 
     assert "not an expense" in instruction or "not expenses" in instruction
+
+
+def test_the_instruction_covers_budgets():
+    instruction = an_agent().instruction
+
+    assert "set_budget" in instruction
+    assert "budget_status" in instruction

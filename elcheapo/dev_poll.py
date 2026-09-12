@@ -59,6 +59,7 @@ async def run() -> None:
             flipp=flipp,
         ),
         currency=settings.currency,
+        timezone_name=settings.timezone,
     )
 
     if not settings.allowed_chat_ids:

@@ -14,8 +14,15 @@ from uuid import UUID
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 
+from elcheapo.budgets import statuses
 from elcheapo.flipp import Flipp, FlippError
-from elcheapo.models import Document, Expense, ExpenseQuery, Task
+from elcheapo.models import (
+    BudgetStatus,
+    Document,
+    Expense,
+    ExpenseQuery,
+    Task,
+)
 from elcheapo.postal import normalise
 from elcheapo.reports import GROUPINGS, build_csv, build_xlsx
 from elcheapo.store.repository import ExpenseRepository
@@ -32,6 +39,8 @@ ADD_TASK = "add_task"
 LIST_TASKS = "list_tasks"
 COMPLETE_TASK = "complete_task"
 EDIT_TASK = "edit_task"
+SET_BUDGET = "set_budget"
+BUDGET_STATUS = "budget_status"
 
 # Said the same way wherever a task id does not match, so the agent learns
 # one recovery rather than three.
@@ -88,6 +97,7 @@ def make_tools(
     currency: str = "CAD",
     documents: list[Document] | None = None,
     flipp: Flipp | None = None,
+    today: Date | None = None,
 ) -> list[Callable]:
     """Build the agent's tool set, bound to one user's data.
 
@@ -99,6 +109,9 @@ def make_tools(
     than one the model never sees.
     """
     produced = documents if documents is not None else []
+    # Which month the budgets are measured against. Passed in rather than
+    # read here, so it matches the user's timezone and the agent's prompt.
+    when = today or Date.today()
 
     def list_categories() -> dict:
         """List every category available to this user.
@@ -264,6 +277,71 @@ def make_tools(
             "filename": name,
             "rows": len(matching),
             "total": f"{total:.2f}",
+        }
+
+    async def set_budget(category: str, amount: str) -> dict:
+        """Set what the user means to spend on a category in a month.
+
+        Call this when they say something like "keep dining under 300" or "my
+        grocery budget is 600". The budget resets on the first of each month.
+
+        Args:
+            category: An existing category name. Call list_categories first if
+                you are not sure it exists -- a budget on a category that does
+                not exist is one nothing will ever be spent against.
+            amount: Decimal string, no currency symbol, for example "300".
+                An empty string removes the budget.
+
+        Returns:
+            What was set or cleared, or an `error` to explain to the user.
+        """
+        known = {
+            existing.name.casefold(): existing.name
+            for existing in repository.categories()
+        }
+        actual = known.get(category.strip().casefold())
+        if actual is None:
+            return {
+                "error": (
+                    f"There is no category called {category!r}. Call "
+                    "list_categories to see what there is."
+                )
+            }
+
+        if not amount.strip():
+            repository.set_budget(actual, None)
+            return {"status": "cleared", "category": actual}
+
+        try:
+            value = Decimal(amount)
+        except InvalidOperation:
+            return {"error": f"amount must be a number like 300, got {amount!r}"}
+        if value <= 0:
+            return {"error": "A budget has to be more than zero."}
+
+        repository.set_budget(actual, value)
+        return {
+            "status": "set",
+            "category": actual,
+            "monthly_budget": f"{value:.2f}",
+        }
+
+    async def budget_status() -> dict:
+        """How the user is doing against their budgets this month. Read-only.
+
+        Call this when they ask how they are doing, whether they can afford
+        something, what is left, or how much of a budget is gone. Answer from
+        what it returns and never estimate.
+
+        Returns:
+            month, and one entry per budgeted category with its budget, what
+            has been spent, what remains, the percent used, and whether it has
+            been passed. Categories with no budget are not included.
+        """
+        standing = statuses(repository, today=when)
+        return {
+            "month": when.strftime("%B %Y"),
+            "budgets": [_as_budget(entry) for entry in standing],
         }
 
     async def add_task(task: str) -> dict:
@@ -520,6 +598,8 @@ def make_tools(
         list_tasks,
         complete_task,
         edit_task,
+        set_budget,
+        budget_status,
     ]
     if flipp is not None:
         tools += [
@@ -572,6 +652,18 @@ def _safe_name(name: str) -> str:
     ]
     collapsed = "-".join(part for part in "".join(kept).split("-") if part)
     return collapsed[:60]
+
+
+def _as_budget(standing: BudgetStatus) -> dict:
+    """JSON-safe view of a budget. Decimal does not serialise."""
+    return {
+        "category": standing.category,
+        "budget": f"{standing.monthly_budget:.2f}",
+        "spent": f"{standing.spent:.2f}",
+        "remaining": f"{standing.remaining:.2f}",
+        "percent": standing.percent,
+        "is_over": standing.is_over,
+    }
 
 
 def _is_task_id(task_id: str) -> bool:

@@ -1,5 +1,7 @@
 """The ADK agent definition."""
 
+from datetime import date as Date
+
 from google.adk.agents import LlmAgent
 
 from elcheapo.agent.tools import make_tools
@@ -50,6 +52,14 @@ for. Always name the file after what is in it -- "september dining", "groceries
 Say in one line what you sent; the file itself is already on its way. If you need the
 authoritative category list, including which ones the user added themselves,
 call list_categories.
+
+Budgets are per category and per month, and reset on the first. Call set_budget
+when they say what they mean to spend on something ("keep dining under 300"),
+and budget_status before answering how they are doing, what is left, or whether
+they can afford something -- read it rather than working it out yourself. Only
+categories with a budget come back; say so plainly if the list is empty. They
+already see where a budget stands on the card after each expense, so do not
+repeat it unprompted.
 
 The user also keeps a todo list here. Call add_task when they say they need to
 do something or want to be reminded of it, and list_tasks before answering any
@@ -113,7 +123,11 @@ def build_agent(
         ),
         description="Logs personal expenses from chat messages, receipts and voice notes.",
         tools=make_tools(
-            repository, currency=currency, documents=documents, flipp=flipp
+            repository,
+            currency=currency,
+            documents=documents,
+            flipp=flipp,
+            today=Date.fromisoformat(today),
         ),
     )
 

@@ -10,6 +10,7 @@ Everything written here is printed as it lands and lost on restart.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import uuid4
 
 from elcheapo.models import Category, Expense, ExpenseQuery, Task
@@ -38,13 +39,27 @@ class InMemoryRepository:
         self._expenses: list[Expense] = []
         self._postal_code: str | None = None
         self._tasks: list[Task] = []
+        # Keyed case-insensitively, as every category lookup is.
+        self._budgets: dict[str, Decimal] = {}
 
     def categories(self) -> list[Category]:
-        return list(self._categories)
+        return [
+            category.model_copy(
+                update={"monthly_budget": self._budgets.get(category.name.casefold())}
+            )
+            for category in self._categories
+        ]
 
     def add_category(self, name: str) -> None:
         self._categories.append(Category(name=name, scope="user"))
         print(f"[memory] new category: {name}")
+
+    def set_budget(self, category: str, monthly_budget: Decimal | None) -> None:
+        if monthly_budget is None:
+            self._budgets.pop(category.casefold(), None)
+        else:
+            self._budgets[category.casefold()] = monthly_budget
+        print(f"[memory] budget for {category}: {monthly_budget}")
 
     def append_expense(self, expense: Expense) -> None:
         self._expenses.append(expense)

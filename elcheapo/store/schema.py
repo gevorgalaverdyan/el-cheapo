@@ -64,6 +64,28 @@ STATEMENTS = [
     CREATE INDEX IF NOT EXISTS expenses_uid_category_idx
         ON expenses (uid, lower(category))
     """,
+    # Budgets are per user, even for the platform categories, which are one
+    # shared row each -- a budget stored there would apply to everybody.
+    """
+    CREATE TABLE IF NOT EXISTS budgets (
+        uid            TEXT NOT NULL,
+        category       TEXT NOT NULL,
+        monthly_budget NUMERIC(12, 2) NOT NULL CHECK (monthly_budget > 0),
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    # One budget per category per user, matched the way category names are
+    # matched everywhere else.
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS budgets_uid_category_key
+        ON budgets (uid, lower(category))
+    """,
+    # Superseded by the table above, and never written to: a budget on a
+    # shared platform row was every user's budget at once.
+    """
+    ALTER TABLE categories DROP COLUMN IF EXISTS monthly_budget
+    """,
     # gen_random_uuid() is built into Postgres 13 and later, so the id is
     # the database's to hand out -- nothing upstream invents one.
     """

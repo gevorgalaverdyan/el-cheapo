@@ -63,12 +63,16 @@ class PostgresRepository:
     # --- reads ----------------------------------------------------------
 
     def categories(self) -> list[Category]:
+        # The budget is joined in per user: the platform categories are one
+        # shared row each, so a budget cannot live on the category itself.
         rows = self._fetch(
             """
-            SELECT name, emoji, scope, monthly_budget
-            FROM categories
-            WHERE uid IS NULL OR uid = :uid
-            ORDER BY scope DESC, lower(name)
+            SELECT c.name, c.emoji, c.scope, b.monthly_budget
+            FROM categories c
+            LEFT JOIN budgets b
+                   ON b.uid = :uid AND lower(b.category) = lower(c.name)
+            WHERE c.uid IS NULL OR c.uid = :uid
+            ORDER BY c.scope DESC, lower(c.name)
             """,
             {"uid": self._uid},
         )
@@ -222,6 +226,33 @@ class PostgresRepository:
             },
         )
         return _to_task(rows[0]) if rows else None
+
+    def set_budget(self, category: str, monthly_budget: Decimal | None) -> None:
+        if monthly_budget is None:
+            self._execute(
+                """
+                DELETE FROM budgets
+                 WHERE uid = :uid AND lower(category) = lower(:category)
+                """,
+                {"uid": self._uid, "category": category},
+            )
+            return
+
+        # The index is on lower(category), so the conflict target is too.
+        self._execute(
+            """
+            INSERT INTO budgets (uid, category, monthly_budget)
+            VALUES (:uid, :category, :monthly_budget)
+            ON CONFLICT (uid, lower(category)) DO UPDATE
+                SET monthly_budget = EXCLUDED.monthly_budget,
+                    updated_at = now()
+            """,
+            {
+                "uid": self._uid,
+                "category": category,
+                "monthly_budget": monthly_budget,
+            },
+        )
 
     def append_expense(self, expense: Expense) -> None:
         # ON CONFLICT DO NOTHING makes a replayed Accept a no-op rather than a

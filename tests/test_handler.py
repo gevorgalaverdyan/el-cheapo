@@ -427,3 +427,21 @@ async def test_an_answer_naming_a_merchant_with_an_ampersand_is_escaped():
     await handler.handle(a_text_update("chicken deals?"))
 
     assert bot.sent[0]["text"] == "M&amp;M Food Market has chicken"
+
+
+async def test_a_confirmed_expense_says_where_its_budget_now_stands():
+    """The budget arrives unasked, at the moment it changed."""
+    handler, bot, repo = make_handler()
+    repo.set_budget("Dining", Decimal("300"))
+
+    await handler.handle(a_callback_update("acc", a_draft(category="Dining")))
+
+    assert "this month" in bot.edited[-1]["text"]
+
+
+async def test_a_confirmed_expense_in_an_unbudgeted_category_stays_quiet():
+    handler, bot, repo = make_handler()
+
+    await handler.handle(a_callback_update("acc", a_draft(category="Groceries")))
+
+    assert "this month" not in bot.edited[-1]["text"]

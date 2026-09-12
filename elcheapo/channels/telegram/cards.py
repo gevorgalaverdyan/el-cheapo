@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from html import escape
 
 from elcheapo.channels.telegram.payload import PayloadError, decode_payload, encode_payload
-from elcheapo.models import Draft
+from elcheapo.models import BudgetStatus, Draft
 
 ZERO_WIDTH_SPACE = "​"
 
@@ -72,17 +72,47 @@ def _format_date(value) -> str:
     return f"{value.day} {value.strftime('%b')} {value.year}"
 
 
-def render_confirmed(draft: Draft, *, currency: str) -> Card:
-    """A committed draft. No payload: this card can no longer be acted on."""
+# Where a budget stops being information and starts being a warning.
+NEARLY_SPENT = 80
+
+
+def render_confirmed(
+    draft: Draft, *, currency: str, budget: BudgetStatus | None = None
+) -> Card:
+    """A committed draft. No payload: this card can no longer be acted on.
+
+    When the category carries a budget, the card says where that budget now
+    stands. This is the one moment the number is worth showing unprompted --
+    the user has just spent, and has not asked.
+    """
     lines = [
         f"✅ <b>{draft.amount} {escape(currency)}</b>",
         f"🛒 {escape(draft.category)}",
         " · ".join(
             part for part in (escape(draft.merchant), _format_date(draft.date)) if part
         ),
-        "<i>logged</i>",
     ]
+    if budget is not None:
+        lines.append(_budget_line(budget))
+    lines.append("<i>logged</i>")
+
     return Card(text="\n".join(lines), reply_markup=None)
+
+
+def _budget_line(budget: BudgetStatus) -> str:
+    """Where a budget stands, loud in proportion to the trouble."""
+    if budget.is_over:
+        marker, tail = "\U0001f6d1", f" — {-budget.remaining:.2f} over"
+    elif budget.percent >= NEARLY_SPENT:
+        marker, tail = "\u26a0\ufe0f", ""
+    else:
+        marker, tail = "\U0001f4ca", ""
+
+    return (
+        f"{marker} {escape(budget.category)} · "
+        f"{budget.spent:.2f} / {budget.monthly_budget:.2f} this month "
+        f"({budget.percent}%){tail}"
+    )
 
 
 def render_discarded(draft: Draft, *, currency: str) -> Card:

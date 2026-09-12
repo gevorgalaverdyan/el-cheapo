@@ -13,10 +13,23 @@ class FakeExpenseRepository:
         self.expenses: list[Expense] = []
         self.calls: list[str] = []
         self.append_failures = 0
+        self._budgets: dict = {}
         self._postal_code: str | None = None
 
     def categories(self) -> list[Category]:
-        return list(self._categories)
+        return [
+            category.model_copy(
+                update={"monthly_budget": self._budgets.get(category.name.casefold())}
+            )
+            for category in self._categories
+        ]
+
+    def set_budget(self, category, monthly_budget) -> None:
+        self.calls.append(f"set_budget:{category}={monthly_budget}")
+        if monthly_budget is None:
+            self._budgets.pop(category.casefold(), None)
+        else:
+            self._budgets[category.casefold()] = monthly_budget
 
     def add_category(self, name: str) -> None:
         self.calls.append(f"add_category:{name}")

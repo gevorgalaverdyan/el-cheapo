@@ -3,9 +3,13 @@ from decimal import Decimal
 
 import pytest
 
-from elcheapo.channels.telegram.cards import draft_from_message, render_card
+from elcheapo.channels.telegram.cards import (
+    draft_from_message,
+    render_card,
+    render_confirmed,
+)
 from elcheapo.channels.telegram.payload import PayloadError, encode_payload
-from elcheapo.models import Draft
+from elcheapo.models import BudgetStatus, Draft
 
 
 def a_draft(**overrides) -> Draft:
@@ -107,3 +111,45 @@ def test_recovery_ignores_the_visible_text_entirely():
 def test_recovery_fails_when_the_message_carries_no_link():
     with pytest.raises(PayloadError):
         draft_from_message({"message_id": 1, "text": "just a message"})
+
+
+# --- budget on the confirmed card --------------------------------------
+
+
+def a_budget(spent: str, limit: str = "300") -> BudgetStatus:
+    return BudgetStatus(
+        category="Dining", monthly_budget=Decimal(limit), spent=Decimal(spent)
+    )
+
+
+def test_a_confirmed_card_says_nothing_about_budgets_when_there_is_none():
+    card = render_confirmed(a_draft(), currency="CAD", budget=None)
+
+    assert "this month" not in card.text
+
+
+def test_a_confirmed_card_shows_where_the_budget_stands():
+    """The moment you spend is the moment the number is worth seeing."""
+    card = render_confirmed(a_draft(), currency="CAD", budget=a_budget("45.00"))
+
+    assert "45.00 / 300.00 this month" in card.text
+    assert "15%" in card.text
+
+
+def test_a_budget_still_well_inside_is_not_dressed_as_a_warning():
+    card = render_confirmed(a_draft(), currency="CAD", budget=a_budget("45.00"))
+
+    assert "📊" in card.text
+
+
+def test_nearing_a_budget_is_marked_as_a_warning():
+    card = render_confirmed(a_draft(), currency="CAD", budget=a_budget("255.00"))
+
+    assert "⚠️" in card.text
+
+
+def test_passing_a_budget_is_marked_more_loudly_and_says_by_how_much():
+    card = render_confirmed(a_draft(), currency="CAD", budget=a_budget("320.00"))
+
+    assert "🛑" in card.text
+    assert "20.00 over" in card.text

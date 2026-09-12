@@ -50,6 +50,8 @@ def test_the_agent_is_given_the_expected_tools(tools):
         "list_tasks",
         "complete_task",
         "edit_task",
+        "set_budget",
+        "budget_status",
     }
 
 
@@ -781,3 +783,89 @@ async def test_editing_with_a_malformed_id_is_refused_the_same_way():
 
     assert "error" in result
     assert repository.update_calls == []
+
+
+# --- budgets -----------------------------------------------------------
+
+
+def budget_tools(repository=None):
+    repository = repository or InMemoryRepository(categories=["Dining", "Groceries"])
+    return {
+        tool.__name__: tool
+        for tool in make_tools(repository, today=date(2026, 9, 12))
+    }, repository
+
+
+async def test_setting_a_budget_stores_it():
+    by_name, repository = budget_tools()
+
+    await by_name["set_budget"]("Dining", "300")
+
+    assert [c.monthly_budget for c in repository.categories() if c.name == "Dining"] == [
+        Decimal("300")
+    ]
+
+
+async def test_a_budget_can_be_cleared_with_an_empty_amount():
+    by_name, repository = budget_tools()
+    await by_name["set_budget"]("Dining", "300")
+
+    await by_name["set_budget"]("Dining", "")
+
+    assert [c.monthly_budget for c in repository.categories() if c.name == "Dining"] == [
+        None
+    ]
+
+
+async def test_a_budget_for_an_unknown_category_is_refused():
+    """Otherwise a typo becomes a budget nothing will ever be spent against."""
+    by_name, repository = budget_tools()
+
+    result = await by_name["set_budget"]("Dning", "300")
+
+    assert "error" in result
+    assert all(c.monthly_budget is None for c in repository.categories())
+
+
+async def test_a_budget_that_is_not_a_number_is_refused():
+    by_name, _ = budget_tools()
+
+    assert "error" in await by_name["set_budget"]("Dining", "lots")
+
+
+async def test_a_negative_budget_is_refused():
+    by_name, _ = budget_tools()
+
+    assert "error" in await by_name["set_budget"]("Dining", "-50")
+
+
+async def test_budget_status_reports_nothing_when_no_budget_is_set():
+    by_name, _ = budget_tools()
+
+    assert (await by_name["budget_status"]())["budgets"] == []
+
+
+async def test_budget_status_reports_spending_against_the_budget():
+    by_name, repository = budget_tools()
+    await by_name["set_budget"]("Dining", "300")
+    repository.append_expense(
+        an_expense(3, "45.00", "Dining", "Kinton Ramen")
+    )
+
+    standing = (await by_name["budget_status"]())["budgets"][0]
+
+    assert standing["spent"] == "45.00"
+    assert standing["budget"] == "300.00"
+    assert standing["remaining"] == "255.00"
+    assert standing["percent"] == 15
+
+
+async def test_budget_status_says_when_a_budget_is_blown():
+    by_name, repository = budget_tools()
+    await by_name["set_budget"]("Dining", "40")
+    repository.append_expense(an_expense(3, "45.00", "Dining"))
+
+    standing = (await by_name["budget_status"]())["budgets"][0]
+
+    assert standing["is_over"] is True
+    assert standing["remaining"] == "-5.00"

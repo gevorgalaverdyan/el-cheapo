@@ -1,7 +1,9 @@
 """Turns Telegram updates into cards, and accepted cards into expenses."""
 
 import logging
+from datetime import date as Date
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Callable, Protocol
 
 from elcheapo.channels.telegram.cards import (
@@ -14,6 +16,7 @@ from elcheapo.channels.telegram.cards import (
 from elcheapo.channels.telegram.markdown import to_html
 from elcheapo.channels.telegram.media import attachment_in
 from elcheapo.channels.telegram.payload import PayloadError
+from elcheapo.budgets import status_for
 from elcheapo.commit import commit_expense
 from elcheapo.models import AgentReply, Attachment
 from elcheapo.repositories import Repositories
@@ -81,12 +84,16 @@ class ExpenseHandler:
         repositories: Repositories,
         proposer: Proposer,
         currency: str,
+        timezone_name: str = "UTC",
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
         self._bot = bot
         self._repositories = repositories
         self._proposer = proposer
         self._currency = currency
+        # A budget month has to end when the user's month does. The clock runs
+        # in UTC, which is a different date for part of every evening here.
+        self._zone = ZoneInfo(timezone_name)
         self._clock = clock
 
     async def handle(self, update: dict) -> None:
@@ -159,6 +166,10 @@ class ExpenseHandler:
             chat_id, to_html(reply.text) or COULD_NOT_READ
         )
 
+    def _today(self) -> Date:
+        """The user's date, not UTC's. Budgets reset on their first."""
+        return self._clock().astimezone(self._zone).date()
+
     async def _handle_callback(self, callback: dict) -> None:
         # Acknowledged first so the client spinner clears even if the work below
         # fails and the update is retried.
@@ -188,7 +199,11 @@ class ExpenseHandler:
                 log.exception("commit failed for draft %s", draft.draft_id)
                 await self._bot.send_message(chat_id, COMMIT_FAILED)
                 return
-            card = render_confirmed(draft, currency=self._currency)
+            card = render_confirmed(
+                draft,
+                currency=self._currency,
+                budget=status_for(repo, draft.category, today=self._today()),
+            )
         else:
             card = render_error(STALE_CARD)
 
