@@ -1,0 +1,78 @@
+"""Test doubles. Nothing here ships."""
+
+from elcheapo.models import Category, Expense
+
+
+class FakeSheetsRepository:
+    """In-memory stand-in for the workbook, recording the order of writes."""
+
+    def __init__(self, categories: list[str] | None = None):
+        self._categories = [
+            Category(name=name, created_by="seed") for name in (categories or [])
+        ]
+        self.expenses: list[Expense] = []
+        self.calls: list[str] = []
+        self.append_failures = 0
+
+    def categories(self) -> list[Category]:
+        return list(self._categories)
+
+    def add_category(self, name: str) -> None:
+        self.calls.append(f"add_category:{name}")
+        self._categories.append(Category(name=name, created_by="agent"))
+
+    def append_expense(self, expense: Expense) -> None:
+        self.calls.append(f"append_expense:{expense.draft_id}")
+        if self.append_failures:
+            self.append_failures -= 1
+            raise RuntimeError("sheets unavailable")
+        self.expenses.append(expense)
+
+    def recent_draft_ids(self, limit: int = 200) -> set[str]:
+        return {expense.draft_id for expense in self.expenses[-limit:]}
+
+
+class FakeTelegramBot:
+    """Records outbound Telegram calls instead of making them."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+        self.edited: list[dict] = []
+        self.answered: list[str] = []
+
+    async def send_message(
+        self, chat_id: int, text: str, reply_markup: dict | None = None
+    ) -> dict:
+        self.sent.append(
+            {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
+        )
+        return {"message_id": 100 + len(self.sent)}
+
+    async def edit_message_text(
+        self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None
+    ) -> None:
+        self.edited.append(
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+                "reply_markup": reply_markup,
+            }
+        )
+
+    async def answer_callback_query(
+        self, callback_query_id: str, text: str = ""
+    ) -> None:
+        self.answered.append(callback_query_id)
+
+
+class StubProposer:
+    """Returns a fixed draft, so handler tests never touch a model."""
+
+    def __init__(self, draft=None):
+        self._draft = draft
+        self.seen: list[str] = []
+
+    async def propose(self, *, text: str, chat_id: int):
+        self.seen.append(text)
+        return self._draft

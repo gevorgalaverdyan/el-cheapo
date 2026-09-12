@@ -1,4 +1,4 @@
-# Nexus Researcher — Conversational Expense Tracker
+# ElCheapo — Conversational Expense Tracker
 
 **Status:** Design approved, pending implementation plan
 **Date:** 2026-09-12
@@ -337,7 +337,7 @@ per workbook and is not part of the request path.
 ## 13. Repository layout
 
 ```
-nexus/
+elcheapo/
   config.py           # env-derived settings
   main.py             # FastAPI app, webhook route, auth
   models.py           # Pydantic: Expense, Draft, Category
